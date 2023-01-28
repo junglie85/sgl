@@ -1,3 +1,3 @@
-# Meh
+# SGL
 
-Meh is a 2D game engine.
+SGL (Simple Game Library) is a 2D game creation utility.

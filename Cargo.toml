@@ -1,10 +1,13 @@
 [package]
-name = "meh"
+name = "sgl"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+futures = "0.3"
+log = "0.4"
 thiserror = "1.0"
+wgpu = "0.14"
 winit = "0.27"
 
 [[example]]

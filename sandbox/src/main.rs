@@ -1,9 +1,15 @@
-use meh::{MehError, Screen, Vk};
+use sgl::{Key, Pixel, Scene, SglError, Window};
 
-fn main() -> Result<(), MehError> {
-    let mut screen = Screen::new(320, 240, "Sandbox")?;
-    while !screen.closed() && !screen.key_down(Vk::Escape) {
-        screen.update();
+fn main() -> Result<(), SglError> {
+    let mut window = Window::new(320, 240, "Sandbox")?;
+
+    while !window.closed() && !window.key_down(Key::Escape) {
+        window.update();
+
+        let mut scene = Scene::new();
+        scene.clear(Pixel::rgb(0x1f, 0x1f, 0xdf));
+
+        window.display(scene);
     }
 
     Ok(())
