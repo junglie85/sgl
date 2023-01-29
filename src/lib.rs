@@ -9,6 +9,7 @@ pub use crate::scene::Scene;
 pub use crate::window::Window;
 
 mod error;
+mod geometry;
 mod graphics_device;
 mod key;
 mod pixel;

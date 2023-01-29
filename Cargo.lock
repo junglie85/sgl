@@ -1183,6 +1183,7 @@ dependencies = [
 name = "sgl"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "futures",
  "log",
  "thiserror",

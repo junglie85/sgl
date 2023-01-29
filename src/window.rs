@@ -1,5 +1,6 @@
+use wgpu::{CommandEncoderDescriptor, SurfaceError, TextureViewDescriptor};
 use winit::{
-    dpi::LogicalSize,
+    dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::EventLoop,
     platform::run_return::EventLoopExtRunReturn,
@@ -92,7 +93,43 @@ impl Window {
         });
     }
 
-    pub fn display(&mut self, scene: Scene) {
-        self.gpu.display(scene, &self.renderer);
+    pub fn display(&mut self, scene: &mut Scene) {
+        let render_commands = self.renderer.prepare(&self.gpu, scene);
+
+        let frame = match self.gpu.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
+                let physical_size = PhysicalSize::new(
+                    self.gpu.surface_config.width,
+                    self.gpu.surface_config.height,
+                );
+                self.gpu.resize(physical_size);
+                return;
+            }
+            Err(SurfaceError::OutOfMemory) => {
+                log::error!("surface out of memory");
+                return;
+            }
+            Err(SurfaceError::Timeout) => {
+                log::warn!("surface timeout");
+                return;
+            }
+        };
+
+        let view = frame.texture.create_view(&TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("sgl::command_encoder"),
+            });
+
+        self.renderer.render(render_commands, &view, &mut encoder);
+
+        self.gpu.queue.submit([encoder.finish()]);
+        frame.present();
+
+        scene.reset();
     }
 }

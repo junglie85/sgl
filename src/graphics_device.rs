@@ -1,13 +1,12 @@
 use futures::executor::block_on;
 use wgpu::{
-    Adapter, Backends, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor,
-    Features, Instance, Limits, LoadOp, Operations, PowerPreference, PresentMode, Queue,
-    RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, Surface,
-    SurfaceConfiguration, SurfaceError, TextureFormat, TextureUsages, TextureViewDescriptor,
+    Adapter, Backends, CompositeAlphaMode, Device, DeviceDescriptor, Features, Instance, Limits,
+    PowerPreference, PresentMode, Queue, RequestAdapterOptions, Surface, SurfaceConfiguration,
+    TextureFormat, TextureUsages,
 };
 use winit::dpi::PhysicalSize;
 
-use crate::{Renderer, Scene, SglError};
+use crate::SglError;
 
 pub struct GraphicsDevice {
     pub(crate) _instance: Instance,
@@ -71,59 +70,6 @@ impl GraphicsDevice {
             limits,
             surface_config,
         })
-    }
-
-    pub fn display(&mut self, scene: Scene, renderer: &Renderer) {
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
-                let physical_size =
-                    PhysicalSize::new(self.surface_config.width, self.surface_config.height);
-                self.resize(physical_size);
-                return;
-            }
-            Err(SurfaceError::OutOfMemory) => {
-                log::error!("surface out of memory");
-                return;
-            }
-            Err(SurfaceError::Timeout) => {
-                log::warn!("surface timeout");
-                return;
-            }
-        };
-
-        let view = frame.texture.create_view(&TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("sgl::command_encoder"),
-            });
-
-        let color_attachment = RenderPassColorAttachment {
-            view: &view,
-            ops: Operations {
-                load: scene
-                    .clear_color
-                    .map_or(LoadOp::Load, |pixel| LoadOp::Clear(pixel.into())),
-                store: true,
-            },
-            resolve_target: None,
-        };
-
-        {
-            let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("sgl::render_pass"),
-                color_attachments: &[Some(color_attachment)],
-                depth_stencil_attachment: None,
-            });
-
-            rpass.set_pipeline(&renderer.pipeline);
-            rpass.draw(0..3, 0..1);
-        }
-
-        self.queue.submit([encoder.finish()]);
-        frame.present();
     }
 
     pub(crate) fn resize(&mut self, new_size: PhysicalSize<u32>) {

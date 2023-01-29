@@ -21,6 +21,7 @@ impl Default for Pixel {
 
 impl Pixel {
     pub const BLACK: Self = Self::rgba(0x00, 0x00, 0x00, 0xff);
+    pub const WHITE: Self = Self::rgba(0xff, 0xff, 0xff, 0xff);
 
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self::rgba(r, g, b, 0xff)
@@ -28,6 +29,15 @@ impl Pixel {
 
     pub const fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
+    }
+
+    pub fn to_array(&self) -> [f32; 4] {
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+            self.a as f32 / 255.0,
+        ]
     }
 }
 
