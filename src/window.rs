@@ -7,7 +7,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{GraphicsDevice, Key, Renderer, Scene, SglError};
+use crate::{GraphicsDevice, Key, Renderer, Scene, SglError, View};
 
 pub struct Window {
     closed: bool,
@@ -15,6 +15,7 @@ pub struct Window {
     pub(crate) native_window: winit::window::Window,
     gpu: GraphicsDevice,
     renderer: Renderer,
+    pub(crate) view: View,
     key_pressed: [bool; 1],
 }
 
@@ -36,6 +37,11 @@ impl Window {
             .map_err(|e| SglError::General(e.to_string()))?;
         let gpu = GraphicsDevice::new(&native_window)?;
         let renderer = Renderer::new(&gpu, &native_window);
+        let view = View::new(
+            (width as f32 / 2.0, height as f32 / 2.0),
+            width as f32,
+            height as f32,
+        );
 
         Ok(Self {
             closed: false,
@@ -43,6 +49,7 @@ impl Window {
             native_window,
             gpu,
             renderer,
+            view,
             key_pressed: [false; 1],
         })
     }
@@ -93,7 +100,7 @@ impl Window {
         });
     }
 
-    pub fn display(&mut self, scene: &mut Scene) {
+    pub fn display(&mut self, scene: Scene) {
         let render_commands = self.renderer.prepare(&self.gpu, scene);
 
         let frame = match self.gpu.surface.get_current_texture() {
@@ -116,7 +123,7 @@ impl Window {
             }
         };
 
-        let view = frame.texture.create_view(&TextureViewDescriptor::default());
+        let surface_view = frame.texture.create_view(&TextureViewDescriptor::default());
 
         let mut encoder = self
             .gpu
@@ -125,11 +132,10 @@ impl Window {
                 label: Some("sgl::command_encoder"),
             });
 
-        self.renderer.render(render_commands, &view, &mut encoder);
+        self.renderer
+            .render(render_commands, &surface_view, &mut encoder);
 
         self.gpu.queue.submit([encoder.finish()]);
         frame.present();
-
-        scene.reset();
     }
 }
