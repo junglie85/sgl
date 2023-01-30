@@ -20,13 +20,20 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new<S>(width: u32, height: u32, title: S) -> Result<Self, SglError>
+    pub fn new<S>(
+        width: u32,
+        height: u32,
+        title: S,
+        pixel_width: u32,
+        pixel_height: u32,
+    ) -> Result<Self, SglError>
     where
         S: Into<String>,
     {
         let event_loop = EventLoop::new();
 
-        let logical_size = LogicalSize::new(width, height);
+        let pixel_size = PhysicalSize::new(pixel_width, pixel_height);
+        let logical_size = LogicalSize::new(width * pixel_size.width, height * pixel_size.height);
         let window_builder = WindowBuilder::new()
             .with_title(title)
             .with_resizable(false)
@@ -36,11 +43,14 @@ impl Window {
             .build(&event_loop)
             .map_err(|e| SglError::General(e.to_string()))?;
         let gpu = GraphicsDevice::new(&native_window)?;
-        let renderer = Renderer::new(&gpu, &native_window);
+        let renderer = Renderer::new(&gpu, &native_window, pixel_size);
         let view = View::new(
-            (width as f32 / 2.0, height as f32 / 2.0),
-            width as f32,
-            height as f32,
+            (
+                logical_size.width as f32 / 2.0,
+                logical_size.height as f32 / 2.0,
+            ),
+            logical_size.width as f32,
+            logical_size.height as f32,
         );
 
         Ok(Self {

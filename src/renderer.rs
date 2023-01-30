@@ -17,12 +17,17 @@ use crate::{geometry::Vertex, GraphicsDevice, Pixel, Scene, View};
 
 pub struct Renderer {
     physical_size: PhysicalSize<u32>,
+    pixel_size: PhysicalSize<u32>,
     view_bind_group_layout: BindGroupLayout,
     pub(crate) pipeline: RenderPipeline,
 }
 
 impl Renderer {
-    pub(crate) fn new(gpu: &GraphicsDevice, native_window: &winit::window::Window) -> Self {
+    pub(crate) fn new(
+        gpu: &GraphicsDevice,
+        native_window: &winit::window::Window,
+        pixel_size: PhysicalSize<u32>,
+    ) -> Self {
         let physical_size = native_window.inner_size();
 
         let view_bind_group_layout =
@@ -95,6 +100,7 @@ impl Renderer {
 
         Self {
             physical_size,
+            pixel_size,
             view_bind_group_layout,
             pipeline,
         }
@@ -128,23 +134,30 @@ impl Renderer {
                     let extent_x = norm_x * thickness;
                     let extent_y = norm_y * thickness;
 
+                    let x0 = from.0 * self.pixel_size.width as f32;
+                    let y0 = from.1 * self.pixel_size.height as f32;
+                    let x1 = to.0 * self.pixel_size.width as f32;
+                    let y1 = to.1 * self.pixel_size.height as f32;
+                    let extent_x1 = extent_x * self.pixel_size.width as f32;
+                    let extent_y1 = extent_y * self.pixel_size.height as f32;
+
                     let fill_color = color.to_array();
 
                     let vertices = vec![
                         Vertex {
-                            coords: [from.0, from.1],
+                            coords: [x0, y0],
                             fill_color,
                         },
                         Vertex {
-                            coords: [from.0 + extent_x, from.1 + extent_y],
+                            coords: [x0 + extent_x1, y0 + extent_y1],
                             fill_color,
                         },
                         Vertex {
-                            coords: [to.0, to.1],
+                            coords: [x1, y1],
                             fill_color,
                         },
                         Vertex {
-                            coords: [to.0 + extent_x, to.1 + extent_y],
+                            coords: [x1 + extent_x1, y1 + extent_y1],
                             fill_color,
                         },
                     ];

@@ -22,6 +22,7 @@ impl Default for Pixel {
 impl Pixel {
     pub const BLACK: Self = Self::rgba(0x00, 0x00, 0x00, 0xff);
     pub const WHITE: Self = Self::rgba(0xff, 0xff, 0xff, 0xff);
+    pub const YELLOW: Self = Self::rgba(0xff, 0xff, 0x00, 0xff);
 
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self::rgba(r, g, b, 0xff)

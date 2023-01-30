@@ -1,7 +1,7 @@
 use sgl::{Key, Pixel, Scene, SglError, Window};
 
 fn main() -> Result<(), SglError> {
-    let mut window = Window::new(320, 240, "Sandbox", 1, 1)?;
+    let mut window = Window::new(320, 240, "Pixel size example", 4, 4)?;
 
     while !window.closed() && !window.key_down(Key::Escape) {
         window.update();
