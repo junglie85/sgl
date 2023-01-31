@@ -179,11 +179,13 @@ impl Renderer {
                         mapped_at_creation: false,
                     });
 
+                    // TODO: Next - upload data in render step. Then one big buffer. Then staging belt.
                     // Upload.
                     gpu.queue.write_buffer(&vbo, 0, cast_slice(&vertices));
                     gpu.queue.write_buffer(&ibo, 0, cast_slice(&indices));
 
                     render_commands.commands.push(RenderCommand::Line {
+                        pipeline: &self.pipeline,
                         vbo,
                         ibo,
                         index_count: indices.len() as u32,
@@ -254,11 +256,12 @@ impl Renderer {
             for render_command in &render_commands.commands {
                 match render_command {
                     RenderCommand::Line {
+                        pipeline,
                         vbo,
                         ibo,
                         index_count,
                     } => {
-                        rpass.set_pipeline(&self.pipeline);
+                        rpass.set_pipeline(*pipeline);
 
                         rpass.set_vertex_buffer(0, vbo.slice(..));
                         rpass.set_index_buffer(ibo.slice(..), IndexFormat::Uint32);
@@ -286,14 +289,14 @@ impl Renderer {
     }
 }
 
-pub(crate) struct RenderCommands {
+pub(crate) struct RenderCommands<'draw> {
     load_op: LoadOp<Color>,
-    commands: Vec<RenderCommand>,
+    commands: Vec<RenderCommand<'draw>>,
 }
 
-enum RenderCommand {
+enum RenderCommand<'draw> {
     Line {
-        // pipeline: &RenderPipeline,
+        pipeline: &'draw RenderPipeline,
         vbo: Buffer,
         ibo: Buffer,
         index_count: u32,
