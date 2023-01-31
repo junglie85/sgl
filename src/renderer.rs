@@ -2,14 +2,14 @@ use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
     BufferBinding, BufferBindingType, BufferDescriptor, BufferSize, BufferUsages, Color,
-    ColorTargetState, ColorWrites, CommandEncoder, Face, FragmentState, FrontFace, IndexFormat,
-    LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PrimitiveState,
-    PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureView,
-    VertexState,
+    ColorTargetState, ColorWrites, CommandEncoder, DynamicOffset, Face, FragmentState, FrontFace,
+    IndexFormat, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode,
+    PrimitiveState, PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+    TextureView, VertexState,
 };
 use winit::dpi::PhysicalSize;
 
@@ -20,7 +20,9 @@ pub struct Renderer {
     pixel_size: PhysicalSize<u32>,
     vbo: Buffer,
     ibo: Buffer,
-    view_bind_group_layout: BindGroupLayout,
+    view_ubo: Buffer,
+    view_ubo_stride: usize,
+    view_bind_group: BindGroup,
     pub(crate) pipeline: RenderPipeline,
 }
 
@@ -28,6 +30,7 @@ impl Renderer {
     const MAX_INSTANCES: usize = 100_000;
     const MAX_VERTICES: usize = Self::MAX_INSTANCES * 4; // Assume rectangles.
     const MAX_INDICES: usize = Self::MAX_INSTANCES * 6; // Assume rectangles.
+    const MAX_VIEWS: usize = 20;
 
     pub(crate) fn new(
         gpu: &GraphicsDevice,
@@ -50,23 +53,46 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let view_ubo_stride = usize::max(
+            size_of::<[f32; 16]>(),
+            gpu.limits.min_uniform_buffer_offset_alignment as usize,
+        );
+
+        let view_ubo = gpu.device.create_buffer(&BufferDescriptor {
+            label: Some("sgl::ubo::view"),
+            size: view_ubo_stride as u64 * Self::MAX_VIEWS as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let view_bind_group_layout =
             gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    label: Some("sgl::bind_group_layout"),
+                    label: Some("sgl::bind_group_layout::view"),
                     entries: &[BindGroupLayoutEntry {
                         binding: 0,
                         visibility: ShaderStages::VERTEX,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(
-                                size_of::<[f32; 16]>() as BufferAddress
-                            ),
+                            has_dynamic_offset: true,
+                            min_binding_size: BufferSize::new(view_ubo_stride as u64),
                         },
                         count: None,
                     }],
                 });
+
+        let view_bind_group = gpu.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("sgl::bind_group::view"),
+            layout: &view_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: &view_ubo,
+                    offset: 0,
+                    size: BufferSize::new(view_ubo_stride as u64 * Self::MAX_VIEWS as u64),
+                }),
+            }],
+        });
 
         let shader_module = gpu.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("sgl::shader_module"),
@@ -123,7 +149,9 @@ impl Renderer {
             pixel_size,
             vbo,
             ibo,
-            view_bind_group_layout,
+            view_ubo,
+            view_ubo_stride,
+            view_bind_group,
             pipeline,
         }
     }
@@ -138,6 +166,7 @@ impl Renderer {
 
         let mut vbo_offset = 0;
         let mut ibo_offset = 0;
+        let mut view_ubo_offset = 0;
 
         for draw_command in scene.draw_commands.into_iter() {
             match draw_command {
@@ -189,9 +218,10 @@ impl Renderer {
 
                     let indices = vec![0, 1, 2, 3];
 
-                    // TODO: Next - One big UBO buffer. Then upload data in render step. Then staging belt.
+                    // TODO: Next - Upload data in render step. Then staging belt.
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
+
                     // Upload.
                     gpu.queue
                         .write_buffer(&self.vbo, vbo_offset, cast_slice(&vertices));
@@ -210,41 +240,21 @@ impl Renderer {
                 }
 
                 DrawCommand::View(view) => {
-                    // UBO.
-                    let ubo = gpu.device.create_buffer(&BufferDescriptor {
-                        label: Some("sgl::ubo"),
-                        size: size_of::<[f32; 16]>() as BufferAddress,
-                        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-
-                    // Create view bind group.
-
-                    let bind_group = gpu.device.create_bind_group(&BindGroupDescriptor {
-                        label: Some("sgl::bind_group"),
-                        layout: &self.view_bind_group_layout,
-                        entries: &[BindGroupEntry {
-                            binding: 0,
-                            resource: BindingResource::Buffer(BufferBinding {
-                                buffer: &ubo,
-                                offset: 0,
-                                size: BufferSize::new(size_of::<[f32; 16]>() as BufferAddress),
-                            }),
-                        }],
-                    });
-
                     // Upload.
                     gpu.queue
-                        .write_buffer(&ubo, 0, cast_slice(&[view.transform()]));
+                        .write_buffer(&self.view_ubo, 0, cast_slice(&[view.transform()]));
 
-                    render_commands
-                        .commands
-                        .push(RenderCommand::View { view, bind_group });
+                    render_commands.commands.push(RenderCommand::View {
+                        view,
+                        offset: view_ubo_offset,
+                    });
+
+                    view_ubo_offset += self.view_ubo_stride as DynamicOffset;
                 }
             }
         }
 
-        // Return data for rendering.
+        // TODO: Return data for rendering.
         render_commands
     }
 
@@ -270,7 +280,7 @@ impl Renderer {
                 depth_stencil_attachment: None,
             });
 
-            for render_command in render_commands.commands.iter() {
+            for render_command in render_commands.commands {
                 match render_command {
                     RenderCommand::Line {
                         pipeline,
@@ -280,15 +290,12 @@ impl Renderer {
                     } => {
                         rpass.set_pipeline(pipeline);
 
-                        rpass.set_vertex_buffer(0, self.vbo.slice(vbo_bounds.clone()));
-                        rpass.set_index_buffer(
-                            self.ibo.slice(ibo_bounds.clone()),
-                            IndexFormat::Uint32,
-                        );
-                        rpass.draw_indexed(0..*index_count, 0, 0..1)
+                        rpass.set_vertex_buffer(0, self.vbo.slice(vbo_bounds));
+                        rpass.set_index_buffer(self.ibo.slice(ibo_bounds), IndexFormat::Uint32);
+                        rpass.draw_indexed(0..index_count, 0, 0..1)
                     }
 
-                    RenderCommand::View { view, bind_group } => {
+                    RenderCommand::View { view, offset } => {
                         let left = view.width() * view.viewport_left();
                         let top = view.height() * view.viewport_top();
                         let right = view.width() * view.viewport_right();
@@ -301,7 +308,7 @@ impl Renderer {
                             top as u32,
                         );
 
-                        rpass.set_bind_group(0, bind_group, &[]);
+                        rpass.set_bind_group(0, &self.view_bind_group, &[offset]);
                     }
                 }
             }
@@ -323,7 +330,7 @@ enum RenderCommand<'draw> {
     },
     View {
         view: View,
-        bind_group: BindGroup,
+        offset: DynamicOffset,
     },
 }
 
