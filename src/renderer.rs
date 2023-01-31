@@ -1,4 +1,4 @@
-use std::{borrow::Cow, mem::size_of};
+use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
 use wgpu::{
@@ -18,17 +18,37 @@ use crate::{geometry::Vertex, GraphicsDevice, Pixel, Scene, View};
 pub struct Renderer {
     physical_size: PhysicalSize<u32>,
     pixel_size: PhysicalSize<u32>,
+    vbo: Buffer,
+    ibo: Buffer,
     view_bind_group_layout: BindGroupLayout,
     pub(crate) pipeline: RenderPipeline,
 }
 
 impl Renderer {
+    const MAX_INSTANCES: usize = 100_000;
+    const MAX_VERTICES: usize = Self::MAX_INSTANCES * 4; // Assume rectangles.
+    const MAX_INDICES: usize = Self::MAX_INSTANCES * 6; // Assume rectangles.
+
     pub(crate) fn new(
         gpu: &GraphicsDevice,
         native_window: &winit::window::Window,
         pixel_size: PhysicalSize<u32>,
     ) -> Self {
         let physical_size = native_window.inner_size();
+
+        let vbo = gpu.device.create_buffer(&BufferDescriptor {
+            label: Some("sgl::vbo"),
+            size: (size_of::<Vertex>() * Self::MAX_VERTICES) as BufferAddress,
+            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let ibo = gpu.device.create_buffer(&BufferDescriptor {
+            label: Some("sgl::ibo"),
+            size: (size_of::<u32>() * Self::MAX_INDICES) as BufferAddress,
+            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let view_bind_group_layout =
             gpu.device
@@ -101,6 +121,8 @@ impl Renderer {
         Self {
             physical_size,
             pixel_size,
+            vbo,
+            ibo,
             view_bind_group_layout,
             pipeline,
         }
@@ -113,6 +135,9 @@ impl Renderer {
                 .map_or(LoadOp::Load, |color| LoadOp::Clear(color.into())),
             commands: Vec::new(),
         };
+
+        let mut vbo_offset = 0;
+        let mut ibo_offset = 0;
 
         for draw_command in scene.draw_commands.into_iter() {
             match draw_command {
@@ -164,32 +189,24 @@ impl Renderer {
 
                     let indices = vec![0, 1, 2, 3];
 
-                    // Create VBO, IBO.
-                    let vbo = gpu.device.create_buffer(&BufferDescriptor {
-                        label: Some("sgl::vbo"),
-                        size: (size_of::<Vertex>() * vertices.len()) as BufferAddress,
-                        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-
-                    let ibo = gpu.device.create_buffer(&BufferDescriptor {
-                        label: Some("sgl::ibo"),
-                        size: (size_of::<u32>() * indices.len()) as BufferAddress,
-                        usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-
-                    // TODO: Next - upload data in render step. Then one big buffer. Then staging belt.
+                    // TODO: Next - One big UBO buffer. Then upload data in render step. Then staging belt.
+                    let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
+                    let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
                     // Upload.
-                    gpu.queue.write_buffer(&vbo, 0, cast_slice(&vertices));
-                    gpu.queue.write_buffer(&ibo, 0, cast_slice(&indices));
+                    gpu.queue
+                        .write_buffer(&self.vbo, vbo_offset, cast_slice(&vertices));
+                    gpu.queue
+                        .write_buffer(&self.ibo, ibo_offset, cast_slice(&indices));
 
                     render_commands.commands.push(RenderCommand::Line {
                         pipeline: &self.pipeline,
-                        vbo,
-                        ibo,
+                        vbo_bounds: vbo_offset..vbo_offset + vertices_size,
+                        ibo_bounds: ibo_offset..ibo_offset + indices_size,
                         index_count: indices.len() as u32,
                     });
+
+                    vbo_offset += vertices_size;
+                    ibo_offset += indices_size;
                 }
 
                 DrawCommand::View(view) => {
@@ -253,18 +270,21 @@ impl Renderer {
                 depth_stencil_attachment: None,
             });
 
-            for render_command in &render_commands.commands {
+            for render_command in render_commands.commands.iter() {
                 match render_command {
                     RenderCommand::Line {
                         pipeline,
-                        vbo,
-                        ibo,
+                        vbo_bounds,
+                        ibo_bounds,
                         index_count,
                     } => {
-                        rpass.set_pipeline(*pipeline);
+                        rpass.set_pipeline(pipeline);
 
-                        rpass.set_vertex_buffer(0, vbo.slice(..));
-                        rpass.set_index_buffer(ibo.slice(..), IndexFormat::Uint32);
+                        rpass.set_vertex_buffer(0, self.vbo.slice(vbo_bounds.clone()));
+                        rpass.set_index_buffer(
+                            self.ibo.slice(ibo_bounds.clone()),
+                            IndexFormat::Uint32,
+                        );
                         rpass.draw_indexed(0..*index_count, 0, 0..1)
                     }
 
@@ -297,8 +317,8 @@ pub(crate) struct RenderCommands<'draw> {
 enum RenderCommand<'draw> {
     Line {
         pipeline: &'draw RenderPipeline,
-        vbo: Buffer,
-        ibo: Buffer,
+        vbo_bounds: Range<BufferAddress>,
+        ibo_bounds: Range<BufferAddress>,
         index_count: u32,
     },
     View {
