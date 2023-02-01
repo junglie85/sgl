@@ -72,6 +72,10 @@ impl Window {
         self.closed
     }
 
+    pub fn view(&self) -> View {
+        self.view
+    }
+
     pub fn key_down(&self, key: Key) -> bool {
         self.key_pressed[key as usize]
     }

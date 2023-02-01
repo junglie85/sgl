@@ -1,6 +1,6 @@
 use mint::Vector2;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct View {
     left: f32,
     right: f32,

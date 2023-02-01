@@ -435,6 +435,7 @@ fn fs_main(in: FsIn) -> FsOut {
 }
 ";
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum DrawCommand {
     Line {
         from: Vec2,

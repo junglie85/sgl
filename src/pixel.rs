@@ -1,6 +1,6 @@
 use wgpu::Color;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pixel {
     pub r: u8,
     pub g: u8,
@@ -69,5 +69,14 @@ mod tests {
         let pixel = Pixel::default();
 
         assert_eq!(Color::WHITE, Into::<Color>::into(pixel));
+    }
+
+    #[test]
+    fn pixel_equality() {
+        let white = Pixel::WHITE;
+        let black = Pixel::BLACK;
+
+        assert_eq!(white, white);
+        assert_ne!(white, black);
     }
 }
