@@ -16,6 +16,10 @@ thiserror = "1.0"
 wgpu = "0.14"
 winit = "0.27"
 
+[[bin]]
+name = "engine"
+path = "bin/engine/src/main.rs"
+
 [[example]]
 name = "sandbox"
 path = "sandbox/src/main.rs"
