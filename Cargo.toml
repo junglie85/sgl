@@ -7,11 +7,12 @@ edition = "2021"
 members = ["crates/sgl_math"]
 
 [dependencies]
-sgl_math = { version = "*", path = "crates/sgl_math" }
+sgl_math = { version = "0.1.0", path = "crates/sgl_math" }
 
 bytemuck = "1.12"
 futures = "0.3"
 log = "0.4"
+mint = "0.5"
 thiserror = "1.0"
 wgpu = "0.14"
 winit = "0.27"

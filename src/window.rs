@@ -1,3 +1,4 @@
+use sgl_math::v2;
 use wgpu::{util::StagingBelt, CommandEncoderDescriptor, SurfaceError, TextureViewDescriptor};
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
@@ -47,7 +48,7 @@ impl Window {
         let renderer = Renderer::new(&gpu, &native_window, pixel_size);
         let staging_belt = StagingBelt::new(1024);
         let view = View::new(
-            (
+            v2(
                 logical_size.width as f32 / 2.0,
                 logical_size.height as f32 / 2.0,
             ),

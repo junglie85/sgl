@@ -1,3 +1,5 @@
+use mint::Vector2;
+
 #[derive(Debug, Clone, Copy)]
 pub struct View {
     left: f32,
@@ -12,15 +14,17 @@ pub struct View {
 }
 
 impl View {
-    pub fn new(center: (f32, f32), width: f32, height: f32) -> Self {
+    pub fn new(center: impl Into<Vector2<f32>>, width: f32, height: f32) -> Self {
+        let center = center.into();
+
         let half_width = width / 2.0;
         let half_height = height / 2.0;
 
         let mut view = Self {
-            left: center.0 - half_width,
-            right: center.0 + half_width,
-            bottom: center.1 - half_height,
-            top: center.1 + half_height,
+            left: center.x - half_width,
+            right: center.x + half_width,
+            bottom: center.y - half_height,
+            top: center.y + half_height,
             viewport_left: 0.0,
             viewport_right: 1.0,
             viewport_bottom: 0.0,

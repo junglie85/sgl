@@ -8,8 +8,8 @@ fn main() -> Result<(), SglError> {
 
         let mut scene = Scene::new(&window);
         scene.clear(Pixel::rgb(0x1f, 0x1f, 0xdf));
-        scene.line(0.0, 0.0, 640.0, 480.0, 2.0, Pixel::WHITE);
-        scene.line(640.0, 480.0, 1280.0, 0.0, 2.0, Pixel::YELLOW);
+        scene.line([0.0, 0.0], [640.0, 480.0], 2.0, Pixel::WHITE);
+        scene.line([640.0, 480.0], [1280.0, 0.0], 2.0, Pixel::YELLOW);
 
         window.display(scene);
     }

@@ -1,6 +1,7 @@
 use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
+use sgl_math::Vec2;
 use wgpu::{
     util::StagingBelt, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
@@ -177,10 +178,8 @@ impl Renderer {
                     thickness,
                     color,
                 } => {
-                    // Create vertices and indices.
-                    // TODO: Vector maths.
-                    let x = to.0 - from.0;
-                    let y = to.1 - from.1;
+                    let x = to.x - from.x;
+                    let y = to.y - from.y;
                     let perp_x = y;
                     let perp_y = -x;
                     let len = (perp_x * perp_x + perp_y * perp_y).sqrt();
@@ -189,10 +188,10 @@ impl Renderer {
                     let extent_x = norm_x * thickness;
                     let extent_y = norm_y * thickness;
 
-                    let x0 = from.0 * self.pixel_size.width as f32;
-                    let y0 = from.1 * self.pixel_size.height as f32;
-                    let x1 = to.0 * self.pixel_size.width as f32;
-                    let y1 = to.1 * self.pixel_size.height as f32;
+                    let x0 = from.x * self.pixel_size.width as f32;
+                    let y0 = from.y * self.pixel_size.height as f32;
+                    let x1 = to.x * self.pixel_size.width as f32;
+                    let y1 = to.y * self.pixel_size.height as f32;
                     let extent_x1 = extent_x * self.pixel_size.width as f32;
                     let extent_y1 = extent_y * self.pixel_size.height as f32;
 
@@ -438,8 +437,8 @@ fn fs_main(in: FsIn) -> FsOut {
 
 pub(crate) enum DrawCommand {
     Line {
-        from: (f32, f32),
-        to: (f32, f32),
+        from: Vec2,
+        to: Vec2,
         thickness: f32,
         color: Pixel,
     },

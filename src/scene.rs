@@ -1,3 +1,5 @@
+use mint::Vector2;
+
 use crate::{renderer::DrawCommand, Window};
 
 use super::pixel::Pixel;
@@ -19,10 +21,13 @@ impl Scene {
         self.clear_color = Some(color);
     }
 
-    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, thickness: f32, color: Pixel) {
+    pub fn line<V2>(&mut self, from: V2, to: V2, thickness: f32, color: Pixel)
+    where
+        V2: Into<Vector2<f32>>,
+    {
         self.draw_commands.push(DrawCommand::Line {
-            from: (x0, y0),
-            to: (x1, y1),
+            from: from.into().into(),
+            to: to.into().into(),
             thickness,
             color,
         });
