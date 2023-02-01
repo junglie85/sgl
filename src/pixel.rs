@@ -52,3 +52,22 @@ impl From<Pixel> for Color {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_pixel_to_array() {
+        let pixel = Pixel::default();
+
+        assert_eq!([1.0; 4], pixel.to_array());
+    }
+
+    #[test]
+    fn convert_pixel_to_wgpu_color() {
+        let pixel = Pixel::default();
+
+        assert_eq!(Color::WHITE, Into::<Color>::into(pixel));
+    }
+}
