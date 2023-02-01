@@ -3,7 +3,12 @@ name = "sgl"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["crates/sgl_math"]
+
 [dependencies]
+sgl_math = { version = "*", path = "crates/sgl_math" }
+
 bytemuck = "1.12"
 futures = "0.3"
 log = "0.4"

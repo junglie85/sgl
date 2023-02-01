@@ -1186,10 +1186,15 @@ dependencies = [
  "bytemuck",
  "futures",
  "log",
+ "sgl_math",
  "thiserror",
  "wgpu",
  "winit",
 ]
+
+[[package]]
+name = "sgl_math"
+version = "0.1.0"
 
 [[package]]
 name = "slab"
