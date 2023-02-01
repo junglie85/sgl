@@ -111,7 +111,7 @@ impl Window {
     }
 
     pub fn display(&mut self, scene: Scene) {
-        let render_commands = self.renderer.prepare(&self.gpu, scene);
+        let (render_data, render_commands) = self.renderer.prepare(scene);
 
         let frame = match self.gpu.surface.get_current_texture() {
             Ok(frame) => frame,
@@ -142,8 +142,13 @@ impl Window {
                 label: Some("sgl::command_encoder"),
             });
 
-        self.renderer
-            .render(render_commands, &surface_view, &mut encoder);
+        self.renderer.render(
+            &self.gpu,
+            render_data,
+            render_commands,
+            &surface_view,
+            &mut encoder,
+        );
 
         self.gpu.queue.submit([encoder.finish()]);
         frame.present();

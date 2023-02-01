@@ -156,7 +156,8 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn prepare(&self, gpu: &GraphicsDevice, scene: Scene) -> RenderCommands {
+    pub(crate) fn prepare(&self, scene: Scene) -> (Vec<RenderData>, RenderCommands) {
+        let mut render_data = Vec::new();
         let mut render_commands = RenderCommands {
             load_op: scene
                 .clear_color
@@ -218,21 +219,23 @@ impl Renderer {
 
                     let indices = vec![0, 1, 2, 3];
 
-                    // TODO: Next - Upload data in render step. Then staging belt.
+                    // TODO: Next - Staging belt.
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
+                    let index_count = indices.len() as u32;
 
-                    // Upload.
-                    gpu.queue
-                        .write_buffer(&self.vbo, vbo_offset, cast_slice(&vertices));
-                    gpu.queue
-                        .write_buffer(&self.ibo, ibo_offset, cast_slice(&indices));
+                    render_data.push(RenderData::Line {
+                        vbo_offset,
+                        ibo_offset,
+                        vertices,
+                        indices,
+                    });
 
                     render_commands.commands.push(RenderCommand::Line {
                         pipeline: &self.pipeline,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
-                        index_count: indices.len() as u32,
+                        index_count,
                     });
 
                     vbo_offset += vertices_size;
@@ -240,9 +243,10 @@ impl Renderer {
                 }
 
                 DrawCommand::View(view) => {
-                    // Upload.
-                    gpu.queue
-                        .write_buffer(&self.view_ubo, 0, cast_slice(&[view.transform()]));
+                    render_data.push(RenderData::View {
+                        offset: view_ubo_offset as BufferAddress,
+                        transform: view.transform(),
+                    });
 
                     render_commands.commands.push(RenderCommand::View {
                         view,
@@ -254,16 +258,37 @@ impl Renderer {
             }
         }
 
-        // TODO: Return data for rendering.
-        render_commands
+        (render_data, render_commands)
     }
 
     pub(crate) fn render(
         &self,
+        gpu: &GraphicsDevice,
+        render_data: Vec<RenderData>,
         render_commands: RenderCommands,
         surface_view: &TextureView,
         encoder: &mut CommandEncoder,
     ) {
+        for data in render_data {
+            match data {
+                RenderData::Line {
+                    vbo_offset,
+                    ibo_offset,
+                    vertices,
+                    indices,
+                } => {
+                    gpu.queue
+                        .write_buffer(&self.vbo, vbo_offset, cast_slice(&vertices));
+                    gpu.queue
+                        .write_buffer(&self.ibo, ibo_offset, cast_slice(&indices));
+                }
+                RenderData::View { offset, transform } => {
+                    gpu.queue
+                        .write_buffer(&self.view_ubo, offset, cast_slice(&[transform]));
+                }
+            }
+        }
+
         let color_attachment = RenderPassColorAttachment {
             view: surface_view,
             ops: Operations {
@@ -314,6 +339,19 @@ impl Renderer {
             }
         }
     }
+}
+
+pub(crate) enum RenderData {
+    Line {
+        vbo_offset: BufferAddress,
+        ibo_offset: BufferAddress,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+    },
+    View {
+        offset: BufferAddress,
+        transform: [f32; 16],
+    },
 }
 
 pub(crate) struct RenderCommands<'draw> {
