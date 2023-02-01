@@ -1,4 +1,4 @@
-use wgpu::{CommandEncoderDescriptor, SurfaceError, TextureViewDescriptor};
+use wgpu::{util::StagingBelt, CommandEncoderDescriptor, SurfaceError, TextureViewDescriptor};
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -15,6 +15,7 @@ pub struct Window {
     pub(crate) native_window: winit::window::Window,
     gpu: GraphicsDevice,
     renderer: Renderer,
+    staging_belt: StagingBelt,
     pub(crate) view: View,
     key_pressed: [bool; 1],
 }
@@ -44,6 +45,7 @@ impl Window {
             .map_err(|e| SglError::General(e.to_string()))?;
         let gpu = GraphicsDevice::new(&native_window)?;
         let renderer = Renderer::new(&gpu, &native_window, pixel_size);
+        let staging_belt = StagingBelt::new(1024);
         let view = View::new(
             (
                 logical_size.width as f32 / 2.0,
@@ -59,6 +61,7 @@ impl Window {
             native_window,
             gpu,
             renderer,
+            staging_belt,
             view,
             key_pressed: [false; 1],
         })
@@ -111,7 +114,7 @@ impl Window {
     }
 
     pub fn display(&mut self, scene: Scene) {
-        let (render_data, render_commands) = self.renderer.prepare(scene);
+        let render_commands = self.renderer.prepare(scene);
 
         let frame = match self.gpu.surface.get_current_texture() {
             Ok(frame) => frame,
@@ -144,13 +147,15 @@ impl Window {
 
         self.renderer.render(
             &self.gpu,
-            render_data,
             render_commands,
             &surface_view,
             &mut encoder,
+            &mut self.staging_belt,
         );
 
+        self.staging_belt.finish();
         self.gpu.queue.submit([encoder.finish()]);
         frame.present();
+        self.staging_belt.recall();
     }
 }

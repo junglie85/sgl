@@ -2,7 +2,7 @@ use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
+    util::StagingBelt, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
     BufferBinding, BufferBindingType, BufferDescriptor, BufferSize, BufferUsages, Color,
     ColorTargetState, ColorWrites, CommandEncoder, DynamicOffset, Face, FragmentState, FrontFace,
@@ -156,13 +156,13 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn prepare(&self, scene: Scene) -> (Vec<RenderData>, RenderCommands) {
-        let mut render_data = Vec::new();
+    pub(crate) fn prepare(&self, scene: Scene) -> RenderCommands {
         let mut render_commands = RenderCommands {
             load_op: scene
                 .clear_color
                 .map_or(LoadOp::Load, |color| LoadOp::Clear(color.into())),
             commands: Vec::new(),
+            data: Vec::new(),
         };
 
         let mut vbo_offset = 0;
@@ -219,23 +219,21 @@ impl Renderer {
 
                     let indices = vec![0, 1, 2, 3];
 
-                    // TODO: Next - Staging belt.
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
-                    let index_count = indices.len() as u32;
-
-                    render_data.push(RenderData::Line {
-                        vbo_offset,
-                        ibo_offset,
-                        vertices,
-                        indices,
-                    });
 
                     render_commands.commands.push(RenderCommand::Line {
                         pipeline: &self.pipeline,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
-                        index_count,
+                        index_count: indices.len() as u32,
+                    });
+
+                    render_commands.data.push(RenderData::Line {
+                        vbo_offset,
+                        ibo_offset,
+                        vertices,
+                        indices,
                     });
 
                     vbo_offset += vertices_size;
@@ -243,14 +241,14 @@ impl Renderer {
                 }
 
                 DrawCommand::View(view) => {
-                    render_data.push(RenderData::View {
-                        offset: view_ubo_offset as BufferAddress,
-                        transform: view.transform(),
-                    });
-
                     render_commands.commands.push(RenderCommand::View {
                         view,
                         offset: view_ubo_offset,
+                    });
+
+                    render_commands.data.push(RenderData::View {
+                        offset: view_ubo_offset as BufferAddress,
+                        transform: view.transform(),
                     });
 
                     view_ubo_offset += self.view_ubo_stride as DynamicOffset;
@@ -258,33 +256,59 @@ impl Renderer {
             }
         }
 
-        (render_data, render_commands)
+        render_commands
     }
 
     pub(crate) fn render(
         &self,
         gpu: &GraphicsDevice,
-        render_data: Vec<RenderData>,
         render_commands: RenderCommands,
         surface_view: &TextureView,
         encoder: &mut CommandEncoder,
+        staging_belt: &mut StagingBelt,
     ) {
-        for data in render_data {
-            match data {
+        for render_data in render_commands.data {
+            match render_data {
                 RenderData::Line {
                     vbo_offset,
                     ibo_offset,
                     vertices,
                     indices,
                 } => {
-                    gpu.queue
-                        .write_buffer(&self.vbo, vbo_offset, cast_slice(&vertices));
-                    gpu.queue
-                        .write_buffer(&self.ibo, ibo_offset, cast_slice(&indices));
+                    staging_belt
+                        .write_buffer(
+                            encoder,
+                            &self.vbo,
+                            vbo_offset,
+                            BufferSize::new(size_of::<Vertex>() as u64 * vertices.len() as u64)
+                                .expect("size must be non-zero"),
+                            &gpu.device,
+                        )
+                        .copy_from_slice(cast_slice(&vertices));
+
+                    staging_belt
+                        .write_buffer(
+                            encoder,
+                            &self.ibo,
+                            ibo_offset,
+                            BufferSize::new(size_of::<u32>() as u64 * indices.len() as u64)
+                                .expect("size must be non-zero"),
+                            &gpu.device,
+                        )
+                        .copy_from_slice(cast_slice(&indices));
                 }
+
                 RenderData::View { offset, transform } => {
-                    gpu.queue
-                        .write_buffer(&self.view_ubo, offset, cast_slice(&[transform]));
+                    staging_belt
+                        .write_buffer(
+                            encoder,
+                            &self.view_ubo,
+                            offset,
+                            BufferSize::new(size_of::<[f32; 16]>() as u64)
+                                .expect("size must be non-zero"),
+                            &gpu.device,
+                        )
+                        .copy_from_slice(cast_slice(&[transform]));
                 }
             }
         }
@@ -341,7 +365,13 @@ impl Renderer {
     }
 }
 
-pub(crate) enum RenderData {
+pub(crate) struct RenderCommands<'draw> {
+    load_op: LoadOp<Color>,
+    commands: Vec<RenderCommand<'draw>>,
+    data: Vec<RenderData>,
+}
+
+enum RenderData {
     Line {
         vbo_offset: BufferAddress,
         ibo_offset: BufferAddress,
@@ -352,11 +382,6 @@ pub(crate) enum RenderData {
         offset: BufferAddress,
         transform: [f32; 16],
     },
-}
-
-pub(crate) struct RenderCommands<'draw> {
-    load_op: LoadOp<Color>,
-    commands: Vec<RenderCommand<'draw>>,
 }
 
 enum RenderCommand<'draw> {
