@@ -1,7 +1,7 @@
 use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
-use sgl_math::Vec2;
+use sgl_math::{v2, Vec2};
 use wgpu::{
     util::StagingBelt, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
@@ -24,7 +24,8 @@ pub struct Renderer {
     view_ubo: Buffer,
     view_ubo_stride: usize,
     view_bind_group: BindGroup,
-    pub(crate) pipeline: RenderPipeline,
+    triangle_list_pipeline: RenderPipeline,
+    triangle_strip_pipeline: RenderPipeline,
 }
 
 impl Renderer {
@@ -108,10 +109,10 @@ impl Renderer {
                 push_constant_ranges: &[],
             });
 
-        let pipeline = gpu
+        let triangle_list_pipeline = gpu
             .device
             .create_render_pipeline(&RenderPipelineDescriptor {
-                label: Some("sgl::pipeline"),
+                label: Some("sgl::pipeline::triangle_list"),
                 layout: Some(&pipeline_layout),
                 vertex: VertexState {
                     module: &shader_module,
@@ -128,10 +129,10 @@ impl Renderer {
                     })],
                 }),
                 primitive: PrimitiveState {
-                    topology: PrimitiveTopology::TriangleStrip,
+                    topology: PrimitiveTopology::TriangleList,
                     polygon_mode: PolygonMode::Fill,
                     front_face: FrontFace::Ccw,
-                    strip_index_format: Some(IndexFormat::Uint32),
+                    strip_index_format: None,
                     cull_mode: Some(Face::Back),
                     conservative: false,
                     unclipped_depth: false,
@@ -145,6 +146,43 @@ impl Renderer {
                 multiview: None,
             });
 
+        let triangle_strip_pipeline =
+            gpu.device
+                .create_render_pipeline(&RenderPipelineDescriptor {
+                    label: Some("sgl::pipeline::triangle_strip"),
+                    layout: Some(&pipeline_layout),
+                    vertex: VertexState {
+                        module: &shader_module,
+                        entry_point: "vs_main",
+                        buffers: &[Vertex::desc()],
+                    },
+                    fragment: Some(FragmentState {
+                        module: &shader_module,
+                        entry_point: "fs_main",
+                        targets: &[Some(ColorTargetState {
+                            format: gpu.surface_config.format,
+                            blend: Some(BlendState::ALPHA_BLENDING),
+                            write_mask: ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: PrimitiveState {
+                        topology: PrimitiveTopology::TriangleStrip,
+                        polygon_mode: PolygonMode::Fill,
+                        front_face: FrontFace::Ccw,
+                        strip_index_format: Some(IndexFormat::Uint32),
+                        cull_mode: Some(Face::Back),
+                        conservative: false,
+                        unclipped_depth: false,
+                    },
+                    depth_stencil: None,
+                    multisample: MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview: None,
+                });
+
         Self {
             physical_size,
             pixel_size,
@@ -153,7 +191,8 @@ impl Renderer {
             view_ubo,
             view_ubo_stride,
             view_bind_group,
-            pipeline,
+            triangle_list_pipeline,
+            triangle_strip_pipeline,
         }
     }
 
@@ -175,8 +214,8 @@ impl Renderer {
                 DrawCommand::Line {
                     from,
                     to,
-                    thickness,
                     color,
+                    thickness,
                 } => {
                     let extent = (to - from).perp_cw().norm() * thickness;
 
@@ -214,13 +253,132 @@ impl Renderer {
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
 
                     render_commands.commands.push(RenderCommand::Line {
-                        pipeline: &self.pipeline,
+                        pipeline: &self.triangle_strip_pipeline,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
                         index_count: indices.len() as u32,
                     });
 
                     render_commands.data.push(RenderData::Line {
+                        vbo_offset,
+                        ibo_offset,
+                        vertices,
+                        indices,
+                    });
+
+                    vbo_offset += vertices_size;
+                    ibo_offset += indices_size;
+                }
+
+                DrawCommand::Rect {
+                    from,
+                    to,
+                    color,
+                    thickness,
+                } => {
+                    if thickness <= 0.0 {
+                        continue;
+                    }
+
+                    let points = [
+                        v2(from.x, from.y),
+                        v2(from.x, to.y),
+                        v2(to.x, to.y),
+                        v2(to.x, from.y),
+                    ];
+                    let point_count = points.len();
+
+                    let mut vertices: Vec<Vertex> = Vec::with_capacity((point_count + 1) * 2);
+                    let mut indices = Vec::with_capacity((point_count + 1) * 2);
+
+                    for i in 0..point_count {
+                        // https://stackoverflow.com/questions/69631855/extrude-2d-vertices-vectors
+
+                        // Get the normals of the vectors either side of the current point (the in and out vectors).
+                        let idx_p1 = (i + 1) % point_count;
+                        let idx_p2 = if i == 0 { point_count - 1 } else { i - 1 };
+
+                        let p0: Vec2 = points[i].into();
+                        let p1: Vec2 = points[idx_p1].into();
+                        let p2: Vec2 = points[idx_p2].into();
+
+                        let v_in = (p0 - p1).perp_cw().norm();
+                        let v_out = (p2 - p0).perp_cw().norm();
+
+                        // Bisect the normals.
+                        let mut bisector = v_in + v_out;
+                        bisector /= bisector.dot(v_in).abs();
+                        bisector *= thickness;
+
+                        // Add the original vertex and the extruded vertex to the geometry.
+                        vertices.push(Vertex::new(p0.to_array(), color.to_array()));
+                        vertices.push(Vertex::new((p0 + bisector).to_array(), color.to_array()));
+
+                        // And the indices for each.
+                        indices.push(i as u32 * 2);
+                        indices.push(i as u32 * 2 + 1);
+                    }
+
+                    // Close the outline.
+                    indices.push(indices[0]);
+                    indices.push(indices[1]);
+
+                    let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
+                    let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
+
+                    render_commands.commands.push(RenderCommand::Rect {
+                        pipeline: &self.triangle_strip_pipeline,
+                        vbo_bounds: vbo_offset..vbo_offset + vertices_size,
+                        ibo_bounds: ibo_offset..ibo_offset + indices_size,
+                        index_count: indices.len() as u32,
+                    });
+
+                    render_commands.data.push(RenderData::Rect {
+                        vbo_offset,
+                        ibo_offset,
+                        vertices,
+                        indices,
+                    });
+
+                    vbo_offset += vertices_size;
+                    ibo_offset += indices_size;
+                }
+
+                DrawCommand::RectFilled { from, to, color } => {
+                    let fill_color = color.to_array();
+
+                    let vertices = vec![
+                        Vertex {
+                            coords: [from.x, from.y],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [from.x, to.y],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [to.x, to.y],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [to.x, from.y],
+                            fill_color,
+                        },
+                    ];
+
+                    let indices = vec![0, 1, 3, 3, 1, 2];
+
+                    let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
+                    let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
+
+                    render_commands.commands.push(RenderCommand::RectFilled {
+                        pipeline: &self.triangle_list_pipeline,
+                        vbo_bounds: vbo_offset..vbo_offset + vertices_size,
+                        ibo_bounds: ibo_offset..ibo_offset + indices_size,
+                        index_count: indices.len() as u32,
+                    });
+
+                    render_commands.data.push(RenderData::RectFilled {
                         vbo_offset,
                         ibo_offset,
                         vertices,
@@ -261,6 +419,18 @@ impl Renderer {
         for render_data in render_commands.data {
             match render_data {
                 RenderData::Line {
+                    vbo_offset,
+                    ibo_offset,
+                    vertices,
+                    indices,
+                }
+                | RenderData::Rect {
+                    vbo_offset,
+                    ibo_offset,
+                    vertices,
+                    indices,
+                }
+                | RenderData::RectFilled {
                     vbo_offset,
                     ibo_offset,
                     vertices,
@@ -327,6 +497,18 @@ impl Renderer {
                         vbo_bounds,
                         ibo_bounds,
                         index_count,
+                    }
+                    | RenderCommand::Rect {
+                        pipeline,
+                        vbo_bounds,
+                        ibo_bounds,
+                        index_count,
+                    }
+                    | RenderCommand::RectFilled {
+                        pipeline,
+                        vbo_bounds,
+                        ibo_bounds,
+                        index_count,
                     } => {
                         rpass.set_pipeline(pipeline);
 
@@ -369,6 +551,18 @@ enum RenderData {
         vertices: Vec<Vertex>,
         indices: Vec<u32>,
     },
+    Rect {
+        vbo_offset: BufferAddress,
+        ibo_offset: BufferAddress,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+    },
+    RectFilled {
+        vbo_offset: BufferAddress,
+        ibo_offset: BufferAddress,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+    },
     View {
         offset: BufferAddress,
         transform: [f32; 16],
@@ -377,6 +571,18 @@ enum RenderData {
 
 enum RenderCommand<'draw> {
     Line {
+        pipeline: &'draw RenderPipeline,
+        vbo_bounds: Range<BufferAddress>,
+        ibo_bounds: Range<BufferAddress>,
+        index_count: u32,
+    },
+    Rect {
+        pipeline: &'draw RenderPipeline,
+        vbo_bounds: Range<BufferAddress>,
+        ibo_bounds: Range<BufferAddress>,
+        index_count: u32,
+    },
+    RectFilled {
         pipeline: &'draw RenderPipeline,
         vbo_bounds: Range<BufferAddress>,
         ibo_bounds: Range<BufferAddress>,
@@ -432,7 +638,18 @@ pub(crate) enum DrawCommand {
     Line {
         from: Vec2,
         to: Vec2,
+        color: Pixel,
         thickness: f32,
+    },
+    Rect {
+        from: Vec2,
+        to: Vec2,
+        color: Pixel,
+        thickness: f32,
+    },
+    RectFilled {
+        from: Vec2,
+        to: Vec2,
         color: Pixel,
     },
     View(View),

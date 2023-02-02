@@ -1,4 +1,5 @@
 use mint::Vector2;
+use sgl_math::{v2, Vec2};
 
 use crate::{renderer::DrawCommand, View};
 
@@ -22,16 +23,48 @@ impl Scene {
         self.draw_commands.drain(1..);
     }
 
-    pub fn draw_line<V2>(&mut self, from: V2, to: V2, thickness: f32, color: Pixel)
+    pub fn draw_point<V>(&mut self, point: V, color: Pixel)
     where
-        V2: Into<Vector2<f32>>,
+        V: Into<Vector2<f32>>,
+    {
+        let from: Vec2 = point.into().into();
+        let to = from + v2(1.0, 1.0);
+        self.draw_filled_rect(from, to, color);
+    }
+
+    pub fn draw_line<V>(&mut self, from: V, to: V, color: Pixel, thickness: f32)
+    where
+        V: Into<Vector2<f32>>,
     {
         self.draw_commands.push(DrawCommand::Line {
             from: from.into().into(),
             to: to.into().into(),
-            thickness,
             color,
+            thickness,
         });
+    }
+
+    pub fn draw_rect<V>(&mut self, from: V, to: V, color: Pixel, thickness: f32)
+    where
+        V: Into<Vector2<f32>>,
+    {
+        self.draw_commands.push(DrawCommand::Rect {
+            from: from.into().into(),
+            to: to.into().into(),
+            color,
+            thickness,
+        });
+    }
+
+    pub fn draw_filled_rect<V>(&mut self, from: V, to: V, color: Pixel)
+    where
+        V: Into<Vector2<f32>>,
+    {
+        self.draw_commands.push(DrawCommand::RectFilled {
+            from: from.into().into(),
+            to: to.into().into(),
+            color,
+        })
     }
 }
 
@@ -61,14 +94,60 @@ mod tests {
     #[test]
     fn scene_draw_line() {
         let mut scene = Scene::new(View::new([0.0, 0.0], 1280.0, 720.0));
-        scene.draw_line(v2(0.0, 0.0), v2(100.0, 150.0), 2.0, Pixel::WHITE);
+        scene.draw_line(v2(0.0, 0.0), v2(100.0, 150.0), Pixel::WHITE, 2.0);
 
         assert_eq!(
             DrawCommand::Line {
                 from: v2(0.0, 0.0),
                 to: v2(100.0, 150.0),
                 thickness: 2.0,
-                color: Pixel::WHITE
+                color: Pixel::WHITE,
+            },
+            scene.draw_commands[1]
+        );
+    }
+
+    #[test]
+    fn scene_draw_rect() {
+        let mut scene = Scene::new(View::new([0.0, 0.0], 1280.0, 720.0));
+        scene.draw_rect(v2(0.0, 0.0), v2(100.0, 150.0), Pixel::WHITE, 2.0);
+
+        assert_eq!(
+            DrawCommand::Rect {
+                from: v2(0.0, 0.0),
+                to: v2(100.0, 150.0),
+                color: Pixel::WHITE,
+                thickness: 2.0,
+            },
+            scene.draw_commands[1]
+        );
+    }
+
+    #[test]
+    fn scene_draw_filled_rect() {
+        let mut scene = Scene::new(View::new([0.0, 0.0], 1280.0, 720.0));
+        scene.draw_filled_rect(v2(0.0, 0.0), v2(100.0, 150.0), Pixel::WHITE);
+
+        assert_eq!(
+            DrawCommand::RectFilled {
+                from: v2(0.0, 0.0),
+                to: v2(100.0, 150.0),
+                color: Pixel::WHITE,
+            },
+            scene.draw_commands[1]
+        );
+    }
+
+    #[test]
+    fn scene_draw_point() {
+        let mut scene = Scene::new(View::new([0.0, 0.0], 1280.0, 720.0));
+        scene.draw_point(v2(0.0, 0.0), Pixel::WHITE);
+
+        assert_eq!(
+            DrawCommand::RectFilled {
+                from: v2(0.0, 0.0),
+                to: v2(1.0, 1.0),
+                color: Pixel::WHITE,
             },
             scene.draw_commands[1]
         );
@@ -78,7 +157,7 @@ mod tests {
     fn clear_scene_removes_draw_commands() {
         let window_view = View::new([0.0, 0.0], 1280.0, 720.0);
         let mut scene = Scene::new(window_view);
-        scene.draw_line(v2(0.0, 0.0), v2(100.0, 150.0), 2.0, Pixel::WHITE);
+        scene.draw_line(v2(0.0, 0.0), v2(100.0, 150.0), Pixel::WHITE, 2.0);
         scene.clear(Pixel::YELLOW);
 
         assert_eq!(Some(Pixel::YELLOW), scene.clear_color);

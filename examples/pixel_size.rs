@@ -9,8 +9,8 @@ fn main() -> Result<(), SglError> {
 
         let mut scene = Scene::new(window.view());
         scene.clear(Pixel::rgb(0x1f, 0x1f, 0xdf));
-        scene.draw_line(v2(0.0, 0.0), v2(160.0, 120.0), 2.0, Pixel::WHITE);
-        scene.draw_line(v2(160.0, 120.0), v2(320.0, 0.0), 2.0, Pixel::YELLOW);
+        scene.draw_line(v2(0.0, 0.0), v2(160.0, 120.0), Pixel::WHITE, 2.0);
+        scene.draw_line(v2(160.0, 120.0), v2(320.0, 0.0), Pixel::YELLOW, 2.0);
 
         window.display(scene);
     }

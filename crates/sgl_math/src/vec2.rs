@@ -35,6 +35,14 @@ impl Vec2 {
             y: -self.x,
         }
     }
+
+    pub fn dot(&self, v: Vec2) -> f32 {
+        self.x * v.x + self.y * v.y
+    }
+
+    pub fn to_array(&self) -> [f32; 2] {
+        [self.x, self.y]
+    }
 }
 
 pub fn v2(x: f32, y: f32) -> Vec2 {
@@ -136,6 +144,12 @@ impl From<Vector2<f32>> for Vec2 {
     }
 }
 
+impl From<[f32; 2]> for Vec2 {
+    fn from(v: [f32; 2]) -> Self {
+        Self { x: v[0], y: v[1] }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +180,21 @@ mod tests {
         let v = v2(10.0, 5.0);
 
         assert_eq!(v2(5.0, -10.0), v.perp_cw())
+    }
+
+    #[test]
+    fn calculate_dot_product_of_two_vec2() {
+        let a = v2(2.0, 4.0);
+        let b = v2(4.0, 8.0);
+
+        assert_eq!(40.0, a.dot(b))
+    }
+
+    #[test]
+    fn vec2_to_array() {
+        let v = v2(10.0, 5.0);
+
+        assert_eq!([10.0, 5.0], v.to_array())
     }
 
     #[test]
@@ -257,5 +286,14 @@ mod tests {
 
         assert_eq!(m.x, v.x);
         assert_eq!(m.y, v.y);
+    }
+
+    #[test]
+    fn f32_array_into_vec2() {
+        let a = [3.0_f32, 4.0_f32];
+        let v: Vec2 = a.into();
+
+        assert_eq!(a[0], v.x);
+        assert_eq!(a[1], v.y);
     }
 }

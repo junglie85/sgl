@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
+
 use wgpu::{BufferAddress, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode};
 
 #[repr(C)]
@@ -14,6 +15,17 @@ unsafe impl Pod for Vertex {}
 unsafe impl Zeroable for Vertex {}
 
 impl Vertex {
+    pub fn new<C, P>(coords: C, fill_color: P) -> Self
+    where
+        C: Into<[f32; 2]>,
+        P: Into<[f32; 4]>,
+    {
+        Self {
+            coords: coords.into(),
+            fill_color: fill_color.into(),
+        }
+    }
+
     pub(crate) fn desc<'a>() -> VertexBufferLayout<'a> {
         VertexBufferLayout {
             array_stride: size_of::<Vertex>() as u64,
