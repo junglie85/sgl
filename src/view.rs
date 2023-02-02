@@ -23,8 +23,8 @@ impl View {
         let mut view = Self {
             left: center.x - half_width,
             right: center.x + half_width,
-            bottom: center.y - half_height,
-            top: center.y + half_height,
+            bottom: center.y + half_height,
+            top: center.y - half_height,
             viewport_left: 0.0,
             viewport_right: 1.0,
             viewport_bottom: 0.0,
@@ -58,7 +58,7 @@ impl View {
     }
 
     pub fn height(&self) -> f32 {
-        self.top - self.bottom
+        self.bottom - self.top
     }
 
     pub fn viewport_left(&self) -> f32 {
@@ -81,17 +81,19 @@ impl View {
         self.transform
     }
 
-    #[rustfmt::skip]
     fn calculate_transform(&mut self) {
         // http://learnwebgl.brown37.net/08_projections/projections_ortho.html
         let width = self.right - self.left;
-        let height = self.top - self.bottom;
+        let height = self.bottom - self.top;
 
-        self.transform = [
-             2.0 / width,                        0.0,                               0.0, 0.0,
-             0.0,                                2.0 / height,                      0.0, 0.0,
-             0.0,                                0.0,                              -0.5, 0.0,
-            -(self.right + self.left) / width, -(self.top + self.bottom) / height, -0.0, 1.0,
+        #[rustfmt::skip]
+        let transform = [
+             2.0 / width,                      0.0,                               0.0, 0.0,
+             0.0,                             -(2.0 / height),                    0.0, 0.0,
+             0.0,                              0.0,                               0.5, 0.0,
+            -(self.right + self.left) / width, (self.top + self.bottom) / height, 1.0, 1.0,
         ];
+
+        self.transform = transform;
     }
 }

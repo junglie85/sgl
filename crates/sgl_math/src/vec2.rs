@@ -12,6 +12,29 @@ impl Vec2 {
     pub fn len(&self) -> f32 {
         (self.x * self.x + self.y * self.y).sqrt()
     }
+
+    pub fn norm(&self) -> Vec2 {
+        let len = self.len();
+
+        Self {
+            x: self.x / len,
+            y: self.y / len,
+        }
+    }
+
+    pub fn perp_ccw(&self) -> Vec2 {
+        Self {
+            x: -self.y,
+            y: self.x,
+        }
+    }
+
+    pub fn perp_cw(&self) -> Vec2 {
+        Self {
+            x: self.y,
+            y: -self.x,
+        }
+    }
 }
 
 pub fn v2(x: f32, y: f32) -> Vec2 {
@@ -122,6 +145,27 @@ mod tests {
         let v = v2(3.0, 4.0);
 
         assert_eq!(5.0, v.len());
+    }
+
+    #[test]
+    fn calculate_normal_of_vec2() {
+        let v = v2(3.0, 4.0);
+
+        assert_eq!(v2(3.0, 4.0) / 5.0, v.norm());
+    }
+
+    #[test]
+    fn calculate_counter_clockwise_perpendicular_of_vec2() {
+        let v = v2(10.0, 5.0);
+
+        assert_eq!(v2(-5.0, 10.0), v.perp_ccw())
+    }
+
+    #[test]
+    fn calculate_clockwise_perpendicular_of_vec2() {
+        let v = v2(10.0, 5.0);
+
+        assert_eq!(v2(5.0, -10.0), v.perp_cw())
     }
 
     #[test]

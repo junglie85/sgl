@@ -178,22 +178,14 @@ impl Renderer {
                     thickness,
                     color,
                 } => {
-                    let x = to.x - from.x;
-                    let y = to.y - from.y;
-                    let perp_x = y;
-                    let perp_y = -x;
-                    let len = (perp_x * perp_x + perp_y * perp_y).sqrt();
-                    let norm_x = if len != 0.0 { perp_x / len } else { 0.0 };
-                    let norm_y = if len != 0.0 { perp_y / len } else { 0.0 };
-                    let extent_x = norm_x * thickness;
-                    let extent_y = norm_y * thickness;
+                    let extent = (to - from).perp_cw().norm() * thickness;
 
                     let x0 = from.x * self.pixel_size.width as f32;
                     let y0 = from.y * self.pixel_size.height as f32;
                     let x1 = to.x * self.pixel_size.width as f32;
                     let y1 = to.y * self.pixel_size.height as f32;
-                    let extent_x1 = extent_x * self.pixel_size.width as f32;
-                    let extent_y1 = extent_y * self.pixel_size.height as f32;
+                    let extent_x = extent.x * self.pixel_size.width as f32;
+                    let extent_y = extent.y * self.pixel_size.height as f32;
 
                     let fill_color = color.to_array();
 
@@ -203,15 +195,15 @@ impl Renderer {
                             fill_color,
                         },
                         Vertex {
-                            coords: [x0 + extent_x1, y0 + extent_y1],
-                            fill_color,
-                        },
-                        Vertex {
                             coords: [x1, y1],
                             fill_color,
                         },
                         Vertex {
-                            coords: [x1 + extent_x1, y1 + extent_y1],
+                            coords: [x0 + extent_x, y0 + extent_y],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [x1 + extent_x, y1 + extent_y],
                             fill_color,
                         },
                     ];
