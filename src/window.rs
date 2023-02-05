@@ -1,5 +1,4 @@
 use sgl_math::v2;
-use wgpu::{util::StagingBelt, CommandEncoderDescriptor, SurfaceError, TextureViewDescriptor};
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -8,15 +7,13 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::{GraphicsDevice, Key, Renderer, Scene, SglError, View};
+use crate::{Key, SglError, View};
 
 pub struct Window {
+    pub(crate) pixel_size: PhysicalSize<u32>,
     closed: bool,
     event_loop: EventLoop<()>,
     pub(crate) native_window: winit::window::Window,
-    gpu: GraphicsDevice,
-    renderer: Renderer,
-    staging_belt: StagingBelt,
     pub(crate) view: View,
     key_pressed: [bool; 1],
 }
@@ -44,9 +41,6 @@ impl Window {
         let native_window = window_builder
             .build(&event_loop)
             .map_err(|e| SglError::General(e.to_string()))?;
-        let gpu = GraphicsDevice::new(&native_window)?;
-        let renderer = Renderer::new(&gpu, &native_window, pixel_size);
-        let staging_belt = StagingBelt::new(1024);
         let view = View::new(
             v2(
                 logical_size.width as f32 / 2.0,
@@ -57,12 +51,10 @@ impl Window {
         );
 
         Ok(Self {
+            pixel_size,
             closed: false,
             event_loop,
             native_window,
-            gpu,
-            renderer,
-            staging_belt,
             view,
             key_pressed: [false; 1],
         })
@@ -116,51 +108,5 @@ impl Window {
                 _ => (),
             }
         });
-    }
-
-    pub fn display(&mut self, scene: Scene) {
-        let render_commands = self.renderer.prepare(scene);
-
-        let frame = match self.gpu.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
-                let physical_size = PhysicalSize::new(
-                    self.gpu.surface_config.width,
-                    self.gpu.surface_config.height,
-                );
-                self.gpu.resize(physical_size);
-                return;
-            }
-            Err(SurfaceError::OutOfMemory) => {
-                log::error!("surface out of memory");
-                return;
-            }
-            Err(SurfaceError::Timeout) => {
-                log::warn!("surface timeout");
-                return;
-            }
-        };
-
-        let surface_view = frame.texture.create_view(&TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .gpu
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("sgl::command_encoder"),
-            });
-
-        self.renderer.render(
-            &self.gpu,
-            render_commands,
-            &surface_view,
-            &mut encoder,
-            &mut self.staging_belt,
-        );
-
-        self.staging_belt.finish();
-        self.gpu.queue.submit([encoder.finish()]);
-        frame.present();
-        self.staging_belt.recall();
     }
 }

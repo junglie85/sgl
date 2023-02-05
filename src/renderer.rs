@@ -3,18 +3,21 @@ use std::{borrow::Cow, mem::size_of, ops::Range};
 use bytemuck::cast_slice;
 use sgl_math::{v2, Vec2};
 use wgpu::{
-    util::StagingBelt, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
     BufferBinding, BufferBindingType, BufferDescriptor, BufferSize, BufferUsages, Color,
     ColorTargetState, ColorWrites, CommandEncoder, DynamicOffset, Face, FragmentState, FrontFace,
     IndexFormat, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode,
     PrimitiveState, PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor,
-    RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    TextureView, VertexState,
+    RenderPipeline, RenderPipelineDescriptor, SamplerBindingType, ShaderModuleDescriptor,
+    ShaderSource, ShaderStages, SurfaceError, TextureSampleType, TextureView, TextureViewDimension,
+    VertexState,
 };
 use winit::dpi::PhysicalSize;
 
-use crate::{geometry::Vertex, GraphicsDevice, Pixel, Scene, View};
+use crate::{
+    geometry::Vertex, Bitmap, GraphicsDevice, Pixel, Scene, SglError, Texture, View, Window,
+};
 
 pub struct Renderer {
     physical_size: PhysicalSize<u32>,
@@ -24,8 +27,10 @@ pub struct Renderer {
     view_ubo: Buffer,
     view_ubo_stride: usize,
     view_bind_group: BindGroup,
+    shape_bind_group_layout: BindGroupLayout,
     triangle_list_pipeline: RenderPipeline,
     triangle_strip_pipeline: RenderPipeline,
+    default_texture: Texture,
 }
 
 impl Renderer {
@@ -34,12 +39,9 @@ impl Renderer {
     const MAX_INDICES: usize = Self::MAX_INSTANCES * 6; // Assume rectangles.
     const MAX_VIEWS: usize = 20;
 
-    pub(crate) fn new(
-        gpu: &GraphicsDevice,
-        native_window: &winit::window::Window,
-        pixel_size: PhysicalSize<u32>,
-    ) -> Self {
-        let physical_size = native_window.inner_size();
+    pub fn new(gpu: &GraphicsDevice, window: &Window) -> Result<Self, SglError> {
+        let physical_size = window.native_window.inner_size();
+        let pixel_size = window.pixel_size;
 
         let vbo = gpu.device.create_buffer(&BufferDescriptor {
             label: Some("sgl::vbo"),
@@ -96,6 +98,30 @@ impl Renderer {
             }],
         });
 
+        let shape_bind_group_layout =
+            gpu.device
+                .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                    label: Some("sgl::bind_group_layout::shape"),
+                    entries: &[
+                        BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: ShaderStages::FRAGMENT,
+                            ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: ShaderStages::FRAGMENT,
+                            ty: BindingType::Texture {
+                                sample_type: TextureSampleType::Float { filterable: true },
+                                view_dimension: TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
         let shader_module = gpu.device.create_shader_module(ShaderModuleDescriptor {
             label: Some("sgl::shader_module"),
             source: ShaderSource::Wgsl(Cow::Borrowed(SHADER)).into(),
@@ -105,7 +131,7 @@ impl Renderer {
             .device
             .create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("sgl::pipeline_layout"),
-                bind_group_layouts: &[&view_bind_group_layout],
+                bind_group_layouts: &[&view_bind_group_layout, &shape_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -183,7 +209,18 @@ impl Renderer {
                     multiview: None,
                 });
 
-        Self {
+        let default_texture = Texture::new(
+            1,
+            1,
+            gpu,
+            gpu.surface_config.format,
+            &shape_bind_group_layout,
+            Some("sgl::renderer::default_texture"),
+        );
+
+        default_texture.upload_to_gpu(gpu, &Bitmap::from_pixels(1, 1, [Pixel::WHITE])?)?;
+
+        Ok(Self {
             physical_size,
             pixel_size,
             vbo,
@@ -191,12 +228,44 @@ impl Renderer {
             view_ubo,
             view_ubo_stride,
             view_bind_group,
+            shape_bind_group_layout,
             triangle_list_pipeline,
             triangle_strip_pipeline,
-        }
+            default_texture,
+        })
     }
 
-    pub(crate) fn prepare(&self, scene: Scene) -> RenderCommands {
+    pub fn begin_scene(&self, window: &Window) -> Scene {
+        Scene::new(window.view())
+    }
+
+    pub fn end_scene(&self, scene: Scene, gpu: &mut GraphicsDevice) {
+        let render_commands = self.prepare(scene);
+
+        let (frame, surface_view) = match gpu.get_frame() {
+            Ok((frame, surface_view)) => (frame, surface_view),
+            Err(SurfaceError::Lost | SurfaceError::Outdated) => {
+                let physical_size =
+                    PhysicalSize::new(gpu.surface_config.width, gpu.surface_config.height);
+                gpu.resize(physical_size);
+                return;
+            }
+            Err(SurfaceError::OutOfMemory) => {
+                log::error!("surface out of memory");
+                return;
+            }
+            Err(SurfaceError::Timeout) => {
+                log::warn!("surface timeout");
+                return;
+            }
+        };
+
+        let mut encoder = gpu.create_command_encoder();
+        self.render(gpu, render_commands, &surface_view, &mut encoder);
+        gpu.present(frame, encoder);
+    }
+
+    pub(crate) fn prepare<'draw>(&'draw self, scene: Scene<'draw>) -> RenderCommands<'draw> {
         let mut render_commands = RenderCommands {
             load_op: scene
                 .clear_color
@@ -231,18 +300,22 @@ impl Renderer {
                     let vertices = vec![
                         Vertex {
                             coords: [x0, y0],
+                            tex_coords: [0.0, 1.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [x1, y1],
+                            tex_coords: [0.0, 0.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [x0 + extent_x, y0 + extent_y],
+                            tex_coords: [1.0, 1.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [x1 + extent_x, y1 + extent_y],
+                            tex_coords: [1.0, 0.0],
                             fill_color,
                         },
                     ];
@@ -254,6 +327,7 @@ impl Renderer {
 
                     render_commands.commands.push(RenderCommand::Line {
                         pipeline: &self.triangle_strip_pipeline,
+                        bind_group: &self.default_texture.bind_group,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
                         index_count: indices.len() as u32,
@@ -311,8 +385,12 @@ impl Renderer {
                         bisector *= thickness;
 
                         // Add the original vertex and the extruded vertex to the geometry.
-                        vertices.push(Vertex::new(p0.to_array(), color.to_array()));
-                        vertices.push(Vertex::new((p0 + bisector).to_array(), color.to_array()));
+                        vertices.push(Vertex::new(p0.to_array(), [0.0, 0.0], color.to_array()));
+                        vertices.push(Vertex::new(
+                            (p0 + bisector).to_array(),
+                            [0.0, 0.0],
+                            color.to_array(),
+                        ));
 
                         // And the indices for each.
                         indices.push(i as u32 * 2);
@@ -328,6 +406,7 @@ impl Renderer {
 
                     render_commands.commands.push(RenderCommand::Rect {
                         pipeline: &self.triangle_strip_pipeline,
+                        bind_group: &self.default_texture.bind_group,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
                         index_count: indices.len() as u32,
@@ -350,18 +429,22 @@ impl Renderer {
                     let vertices = vec![
                         Vertex {
                             coords: [from.x, from.y],
+                            tex_coords: [0.0, 1.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [from.x, to.y],
+                            tex_coords: [0.0, 0.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [to.x, to.y],
+                            tex_coords: [1.0, 0.0],
                             fill_color,
                         },
                         Vertex {
                             coords: [to.x, from.y],
+                            tex_coords: [1.0, 1.0],
                             fill_color,
                         },
                     ];
@@ -373,12 +456,63 @@ impl Renderer {
 
                     render_commands.commands.push(RenderCommand::RectFilled {
                         pipeline: &self.triangle_list_pipeline,
+                        bind_group: &self.default_texture.bind_group,
                         vbo_bounds: vbo_offset..vbo_offset + vertices_size,
                         ibo_bounds: ibo_offset..ibo_offset + indices_size,
                         index_count: indices.len() as u32,
                     });
 
                     render_commands.data.push(RenderData::RectFilled {
+                        vbo_offset,
+                        ibo_offset,
+                        vertices,
+                        indices,
+                    });
+
+                    vbo_offset += vertices_size;
+                    ibo_offset += indices_size;
+                }
+
+                DrawCommand::RectTextured { from, to, texture } => {
+                    let fill_color = Pixel::WHITE.to_array();
+
+                    let vertices = vec![
+                        Vertex {
+                            coords: [from.x, from.y],
+                            tex_coords: [0.0, 1.0],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [from.x, to.y],
+                            tex_coords: [0.0, 0.0],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [to.x, to.y],
+                            tex_coords: [1.0, 0.0],
+                            fill_color,
+                        },
+                        Vertex {
+                            coords: [to.x, from.y],
+                            tex_coords: [1.0, 1.0],
+                            fill_color,
+                        },
+                    ];
+
+                    let indices = vec![0, 1, 3, 3, 1, 2];
+
+                    let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
+                    let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
+
+                    render_commands.commands.push(RenderCommand::RectTextured {
+                        pipeline: &self.triangle_list_pipeline,
+                        bind_group: &texture.bind_group,
+                        vbo_bounds: vbo_offset..vbo_offset + vertices_size,
+                        ibo_bounds: ibo_offset..ibo_offset + indices_size,
+                        index_count: indices.len() as u32,
+                    });
+
+                    render_commands.data.push(RenderData::RectTextured {
                         vbo_offset,
                         ibo_offset,
                         vertices,
@@ -410,11 +544,10 @@ impl Renderer {
 
     pub(crate) fn render(
         &self,
-        gpu: &GraphicsDevice,
+        gpu: &mut GraphicsDevice,
         render_commands: RenderCommands,
         surface_view: &TextureView,
         encoder: &mut CommandEncoder,
-        staging_belt: &mut StagingBelt,
     ) {
         for render_data in render_commands.data {
             match render_data {
@@ -435,8 +568,14 @@ impl Renderer {
                     ibo_offset,
                     vertices,
                     indices,
+                }
+                | RenderData::RectTextured {
+                    vbo_offset,
+                    ibo_offset,
+                    vertices,
+                    indices,
                 } => {
-                    staging_belt
+                    gpu.staging_belt
                         .write_buffer(
                             encoder,
                             &self.vbo,
@@ -447,7 +586,7 @@ impl Renderer {
                         )
                         .copy_from_slice(cast_slice(&vertices));
 
-                    staging_belt
+                    gpu.staging_belt
                         .write_buffer(
                             encoder,
                             &self.ibo,
@@ -460,7 +599,7 @@ impl Renderer {
                 }
 
                 RenderData::View { offset, transform } => {
-                    staging_belt
+                    gpu.staging_belt
                         .write_buffer(
                             encoder,
                             &self.view_ubo,
@@ -494,23 +633,35 @@ impl Renderer {
                 match render_command {
                     RenderCommand::Line {
                         pipeline,
+                        bind_group,
                         vbo_bounds,
                         ibo_bounds,
                         index_count,
                     }
                     | RenderCommand::Rect {
                         pipeline,
+                        bind_group,
                         vbo_bounds,
                         ibo_bounds,
                         index_count,
                     }
                     | RenderCommand::RectFilled {
                         pipeline,
+                        bind_group,
+                        vbo_bounds,
+                        ibo_bounds,
+                        index_count,
+                    }
+                    | RenderCommand::RectTextured {
+                        pipeline,
+                        bind_group,
                         vbo_bounds,
                         ibo_bounds,
                         index_count,
                     } => {
                         rpass.set_pipeline(pipeline);
+
+                        rpass.set_bind_group(1, bind_group, &[]);
 
                         rpass.set_vertex_buffer(0, self.vbo.slice(vbo_bounds));
                         rpass.set_index_buffer(self.ibo.slice(ibo_bounds), IndexFormat::Uint32);
@@ -535,6 +686,26 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    pub fn create_texture(
+        &self,
+        gpu: &GraphicsDevice,
+        bitmap: &Bitmap,
+        label: Option<&str>,
+    ) -> Result<Texture, SglError> {
+        let texture = Texture::new(
+            bitmap.width(),
+            bitmap.height(),
+            gpu,
+            gpu.surface_config.format,
+            &self.shape_bind_group_layout,
+            label,
+        );
+
+        texture.upload_to_gpu(gpu, bitmap)?;
+
+        Ok(texture)
     }
 }
 
@@ -563,6 +734,12 @@ enum RenderData {
         vertices: Vec<Vertex>,
         indices: Vec<u32>,
     },
+    RectTextured {
+        vbo_offset: BufferAddress,
+        ibo_offset: BufferAddress,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+    },
     View {
         offset: BufferAddress,
         transform: [f32; 16],
@@ -572,18 +749,28 @@ enum RenderData {
 enum RenderCommand<'draw> {
     Line {
         pipeline: &'draw RenderPipeline,
+        bind_group: &'draw BindGroup,
         vbo_bounds: Range<BufferAddress>,
         ibo_bounds: Range<BufferAddress>,
         index_count: u32,
     },
     Rect {
         pipeline: &'draw RenderPipeline,
+        bind_group: &'draw BindGroup,
         vbo_bounds: Range<BufferAddress>,
         ibo_bounds: Range<BufferAddress>,
         index_count: u32,
     },
     RectFilled {
         pipeline: &'draw RenderPipeline,
+        bind_group: &'draw BindGroup,
+        vbo_bounds: Range<BufferAddress>,
+        ibo_bounds: Range<BufferAddress>,
+        index_count: u32,
+    },
+    RectTextured {
+        pipeline: &'draw RenderPipeline,
+        bind_group: &'draw BindGroup,
         vbo_bounds: Range<BufferAddress>,
         ibo_bounds: Range<BufferAddress>,
         index_count: u32,
@@ -602,39 +789,48 @@ var<uniform> scene_transform: mat4x4<f32>;
 
 struct VsIn {
     @location(0) coords: vec2<f32>,
-    @location(1) fill_color: vec4<f32>,
+    @location(1) tex_coords: vec2<f32>,
+    @location(2) fill_color: vec4<f32>,
 };
 
 struct VsOut {
     @builtin(position) position: vec4<f32>,
-    @location(0) fill_color: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+    @location(1) fill_color: vec4<f32>,
 };
 
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     let position = scene_transform * vec4<f32>(in.coords, 0.0, 1.0);
+    let tex_coords = vec2<f32>(in.tex_coords.x, 1.0 - in.tex_coords.y);
 
-    return VsOut(position, in.fill_color);
+    return VsOut(position, tex_coords, in.fill_color);
 }
 
-// Fragment
-
 struct FsIn {
-    @location(0) fill_color: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+    @location(1) fill_color: vec4<f32>,
 };
 
 struct FsOut {
     @location(0) color: vec4<f32>,
 };
 
+@group(1) @binding(0)
+var texture_sampler: sampler;
+@group(1) @binding(1)
+var texture: texture_2d<f32>;
+
 @fragment
 fn fs_main(in: FsIn) -> FsOut {
-    return FsOut(in.fill_color);
+    let color = textureSample(texture, texture_sampler, in.tex_coords) * in.fill_color;
+
+    return FsOut(color);
 }
 ";
 
-#[derive(Debug, PartialEq)]
-pub(crate) enum DrawCommand {
+#[derive(Debug)]
+pub(crate) enum DrawCommand<'scene> {
     Line {
         from: Vec2,
         to: Vec2,
@@ -651,6 +847,11 @@ pub(crate) enum DrawCommand {
         from: Vec2,
         to: Vec2,
         color: Pixel,
+    },
+    RectTextured {
+        from: Vec2,
+        to: Vec2,
+        texture: &'scene Texture,
     },
     View(View),
 }
