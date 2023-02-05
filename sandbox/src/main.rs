@@ -1,4 +1,4 @@
-use sgl::{Bitmap, GraphicsDevice, Key, Pixel, Renderer, SglError, Window};
+use sgl::{util, Bitmap, GraphicsDevice, Key, Pixel, Renderer, SglError, Window};
 
 fn main() -> Result<(), SglError> {
     let mut window = Window::new(320, 240, "Sandbox", 1, 1)?;
@@ -8,6 +8,9 @@ fn main() -> Result<(), SglError> {
     let pixels = [Pixel::RED, Pixel::GREEN, Pixel::WHITE, Pixel::YELLOW];
     let bitmap = Bitmap::from_pixels(2, 2, pixels)?;
     let texture = renderer.create_texture(&gpu, &bitmap, Some("a texture"))?;
+
+    let wizard_bitmap = util::bitmap::from_image_bytes(include_bytes!("wizard.png"))?;
+    let wizard = renderer.create_texture(&gpu, &wizard_bitmap, Some("wizard"))?;
 
     while !window.closed() && !window.key_down(Key::Escape) {
         window.update();
@@ -20,6 +23,7 @@ fn main() -> Result<(), SglError> {
         scene.draw_rect([10.0, 200.0], [310.0, 230.0], Pixel::WHITE, 2.0);
         scene.draw_filled_rect([10.0, 200.0], [310.0, 230.0], Pixel::GREEN);
         scene.draw_textured_rect([10.0, 140.0], [50.0, 190.0], &texture);
+        scene.draw_textured_rect([60.0, 140.0], [76.0, 156.0], &wizard);
 
         renderer.end_scene(scene, &mut gpu);
     }

@@ -20,5 +20,6 @@ mod pixel;
 mod renderer;
 mod scene;
 mod texture;
+pub mod util;
 mod view;
 mod window;

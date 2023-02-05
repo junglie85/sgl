@@ -1,5 +1,7 @@
 use wgpu::Color;
 
+use crate::SglError;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pixel {
     pub r: u8,
@@ -55,6 +57,20 @@ impl From<Pixel> for Color {
     }
 }
 
+impl TryFrom<&[u8]> for Pixel {
+    type Error = SglError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() != 4 {
+            return Err(SglError::General(
+                "unable to convert byte to pixel".to_string(),
+            ));
+        }
+
+        Ok(Pixel::rgba(value[0], value[1], value[2], value[3]))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +87,16 @@ mod tests {
         let pixel = Pixel::default();
 
         assert_eq!(Color::WHITE, Into::<Color>::into(pixel));
+    }
+
+    #[test]
+    fn convert_slice_of_bytes_to_pixel() {
+        let bytes: &[u8] = &[0xff, 0xee, 0xdd, 0xcc];
+
+        assert_eq!(
+            Pixel::rgba(0xff, 0xee, 0xdd, 0xcc),
+            bytes.try_into().unwrap()
+        );
     }
 
     #[test]

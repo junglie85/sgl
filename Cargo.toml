@@ -6,6 +6,9 @@ edition = "2021"
 [workspace]
 members = ["crates/sgl_math"]
 
+[features]
+default = ["image"]
+
 [dependencies]
 sgl_math = { version = "0.1.0", path = "crates/sgl_math" }
 
@@ -16,6 +19,10 @@ mint = "0.5"
 thiserror = "1.0"
 wgpu = "0.14"
 winit = "0.27"
+
+image = { version = "0.24", default-features = false, features = [
+    "png",
+], optional = true }
 
 [[example]]
 name = "sandbox"
@@ -28,3 +35,7 @@ path = "examples/lines.rs"
 [[example]]
 name = "pixel_size"
 path = "examples/pixel_size.rs"
+
+[[example]]
+name = "sprite"
+path = "examples/sprite.rs"
