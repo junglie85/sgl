@@ -96,6 +96,24 @@ impl SubAssign for Vec2 {
     }
 }
 
+impl Mul for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+        }
+    }
+}
+
+impl MulAssign for Vec2 {
+    fn mul_assign(&mut self, rhs: Self) {
+        self.x *= rhs.x;
+        self.y *= rhs.y;
+    }
+}
+
 impl Mul<f32> for Vec2 {
     type Output = Vec2;
 
@@ -141,6 +159,15 @@ impl From<Vec2> for Vector2<f32> {
 impl From<Vector2<f32>> for Vec2 {
     fn from(v: Vector2<f32>) -> Self {
         Self { x: v.x, y: v.y }
+    }
+}
+
+impl From<(u32, u32)> for Vec2 {
+    fn from(value: (u32, u32)) -> Self {
+        Self {
+            x: value.0 as f32,
+            y: value.1 as f32,
+        }
     }
 }
 
@@ -241,6 +268,22 @@ mod tests {
     }
 
     #[test]
+    fn vec2_mul_vec2() {
+        let a = v2(2.0, 4.0);
+        let b = v2(3.0, 5.0);
+
+        assert_eq!(a * b, v2(6.0, 20.0));
+    }
+
+    #[test]
+    fn vec2_mul_assign_vec2() {
+        let mut a = v2(2.0, 4.0);
+        a *= v2(3.0, 5.0);
+
+        assert_eq!(a, v2(6.0, 20.0));
+    }
+
+    #[test]
     fn vec2_mul_scalar() {
         let a = v2(2.0, 4.0);
 
@@ -286,6 +329,13 @@ mod tests {
 
         assert_eq!(m.x, v.x);
         assert_eq!(m.y, v.y);
+    }
+
+    #[test]
+    fn u32_tuple_into_vec2() {
+        let v = (1_u32, 2_u32).into();
+
+        assert_eq!(v2(1.0, 2.0), v);
     }
 
     #[test]

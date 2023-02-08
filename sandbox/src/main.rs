@@ -1,4 +1,4 @@
-use sgl::{util, Bitmap, GraphicsDevice, Key, Pixel, Renderer, SglError, Window};
+use sgl::{load_file, Bitmap, GraphicsDevice, Key, Pixel, Renderer, SglError, Window};
 
 fn main() -> Result<(), SglError> {
     let mut window = Window::new(320, 240, "Sandbox", 1, 1)?;
@@ -9,8 +9,16 @@ fn main() -> Result<(), SglError> {
     let bitmap = Bitmap::from_pixels(2, 2, pixels)?;
     let texture = renderer.create_texture(&gpu, &bitmap, Some("a texture"))?;
 
-    let wizard_bitmap = util::bitmap::from_image_bytes(include_bytes!("wizard.png"))?;
+    let wizard_bytes = load_file("examples/assets/wizard.png")?;
+    let wizard_bitmap = Bitmap::from_image_bytes(&wizard_bytes)?;
     let wizard = renderer.create_texture(&gpu, &wizard_bitmap, Some("wizard"))?;
+
+    let ufo_bytes = load_file("examples/assets/ufo.png")?;
+    let ufo_bitmap = Bitmap::from_image_bytes(&ufo_bytes)?;
+    let ufo = renderer.create_texture(&gpu, &ufo_bitmap, Some("ufo"))?;
+    let w = ufo_bitmap.width() as f32;
+    let h = ufo_bitmap.height() as f32;
+    let center = [w / 2.0, h / 2.0];
 
     while !window.closed() && !window.key_down(Key::Escape) {
         window.update();
@@ -24,6 +32,13 @@ fn main() -> Result<(), SglError> {
         scene.draw_filled_rect([10.0, 200.0], [310.0, 230.0], Pixel::GREEN);
         scene.draw_textured_rect([10.0, 140.0], [50.0, 190.0], &texture);
         scene.draw_textured_rect([60.0, 140.0], [76.0, 156.0], &wizard);
+        scene.draw_textured_rect_ext(
+            [80.0, 140.0],
+            [80.0 + 64.0, 140.0 + 64.0],
+            &ufo,
+            center,
+            [w, h],
+        );
 
         renderer.end_scene(scene, &mut gpu);
     }

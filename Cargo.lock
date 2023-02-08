@@ -1235,6 +1235,7 @@ dependencies = [
  "image",
  "log",
  "mint",
+ "once_cell",
  "sgl_math",
  "thiserror",
  "wgpu",

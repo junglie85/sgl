@@ -1,7 +1,7 @@
 use std::{borrow::Cow, mem::size_of, ops::Range};
 
 use bytemuck::cast_slice;
-use sgl_math::{v2, Vec2};
+use sgl_math::Vec2;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferAddress,
@@ -16,7 +16,9 @@ use wgpu::{
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    geometry::Vertex, Bitmap, GraphicsDevice, Pixel, Scene, SglError, Texture, View, Window,
+    geometry::Vertex,
+    shape::{LineShape, RectangleShape},
+    Bitmap, GraphicsDevice, Pixel, Scene, SglError, Texture, View, Window,
 };
 
 pub struct Renderer {
@@ -286,41 +288,9 @@ impl Renderer {
                     color,
                     thickness,
                 } => {
-                    let extent = (to - from).perp_cw().norm() * thickness;
-
-                    let x0 = from.x * self.pixel_size.width as f32;
-                    let y0 = from.y * self.pixel_size.height as f32;
-                    let x1 = to.x * self.pixel_size.width as f32;
-                    let y1 = to.y * self.pixel_size.height as f32;
-                    let extent_x = extent.x * self.pixel_size.width as f32;
-                    let extent_y = extent.y * self.pixel_size.height as f32;
-
-                    let fill_color = color.to_array();
-
-                    let vertices = vec![
-                        Vertex {
-                            coords: [x0, y0],
-                            tex_coords: [0.0, 1.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [x1, y1],
-                            tex_coords: [0.0, 0.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [x0 + extent_x, y0 + extent_y],
-                            tex_coords: [1.0, 1.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [x1 + extent_x, y1 + extent_y],
-                            tex_coords: [1.0, 0.0],
-                            fill_color,
-                        },
-                    ];
-
-                    let indices = vec![0, 1, 2, 3];
+                    let line = LineShape::new(from, to);
+                    let pixel_size = (self.pixel_size.width, self.pixel_size.height).into();
+                    let (vertices, indices) = line.fill_geometry(thickness, color, pixel_size);
 
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
@@ -354,52 +324,9 @@ impl Renderer {
                         continue;
                     }
 
-                    let points = [
-                        v2(from.x, from.y),
-                        v2(from.x, to.y),
-                        v2(to.x, to.y),
-                        v2(to.x, from.y),
-                    ];
-                    let point_count = points.len();
-
-                    let mut vertices: Vec<Vertex> = Vec::with_capacity((point_count + 1) * 2);
-                    let mut indices = Vec::with_capacity((point_count + 1) * 2);
-
-                    for i in 0..point_count {
-                        // https://stackoverflow.com/questions/69631855/extrude-2d-vertices-vectors
-
-                        // Get the normals of the vectors either side of the current point (the in and out vectors).
-                        let idx_p1 = (i + 1) % point_count;
-                        let idx_p2 = if i == 0 { point_count - 1 } else { i - 1 };
-
-                        let p0: Vec2 = points[i].into();
-                        let p1: Vec2 = points[idx_p1].into();
-                        let p2: Vec2 = points[idx_p2].into();
-
-                        let v_in = (p0 - p1).perp_cw().norm();
-                        let v_out = (p2 - p0).perp_cw().norm();
-
-                        // Bisect the normals.
-                        let mut bisector = v_in + v_out;
-                        bisector /= bisector.dot(v_in).abs();
-                        bisector *= thickness;
-
-                        // Add the original vertex and the extruded vertex to the geometry.
-                        vertices.push(Vertex::new(p0.to_array(), [0.0, 0.0], color.to_array()));
-                        vertices.push(Vertex::new(
-                            (p0 + bisector).to_array(),
-                            [0.0, 0.0],
-                            color.to_array(),
-                        ));
-
-                        // And the indices for each.
-                        indices.push(i as u32 * 2);
-                        indices.push(i as u32 * 2 + 1);
-                    }
-
-                    // Close the outline.
-                    indices.push(indices[0]);
-                    indices.push(indices[1]);
+                    let rect = RectangleShape::new(from, to);
+                    let pixel_size = (self.pixel_size.width, self.pixel_size.height).into();
+                    let (vertices, indices) = rect.outline_geometry(thickness, color, pixel_size);
 
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
@@ -424,32 +351,9 @@ impl Renderer {
                 }
 
                 DrawCommand::RectFilled { from, to, color } => {
-                    let fill_color = color.to_array();
-
-                    let vertices = vec![
-                        Vertex {
-                            coords: [from.x, from.y],
-                            tex_coords: [0.0, 1.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [from.x, to.y],
-                            tex_coords: [0.0, 0.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [to.x, to.y],
-                            tex_coords: [1.0, 0.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [to.x, from.y],
-                            tex_coords: [1.0, 1.0],
-                            fill_color,
-                        },
-                    ];
-
-                    let indices = vec![0, 1, 3, 3, 1, 2];
+                    let rect = RectangleShape::new(from, to);
+                    let pixel_size = (self.pixel_size.width, self.pixel_size.height).into();
+                    let (vertices, indices) = rect.fill_geometry(color, pixel_size);
 
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
@@ -473,33 +377,16 @@ impl Renderer {
                     ibo_offset += indices_size;
                 }
 
-                DrawCommand::RectTextured { from, to, texture } => {
-                    let fill_color = Pixel::WHITE.to_array();
-
-                    let vertices = vec![
-                        Vertex {
-                            coords: [from.x, from.y],
-                            tex_coords: [0.0, 1.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [from.x, to.y],
-                            tex_coords: [0.0, 0.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [to.x, to.y],
-                            tex_coords: [1.0, 0.0],
-                            fill_color,
-                        },
-                        Vertex {
-                            coords: [to.x, from.y],
-                            tex_coords: [1.0, 1.0],
-                            fill_color,
-                        },
-                    ];
-
-                    let indices = vec![0, 1, 3, 3, 1, 2];
+                DrawCommand::RectTextured {
+                    from,
+                    to,
+                    texture,
+                    sub_coords,
+                } => {
+                    let rect = RectangleShape::new(from, to);
+                    let pixel_size = (self.pixel_size.width, self.pixel_size.height).into();
+                    let (vertices, indices) =
+                        rect.texture_geometry(texture, sub_coords, pixel_size);
 
                     let vertices_size = size_of::<Vertex>() as u64 * vertices.len() as u64;
                     let indices_size = size_of::<u32>() as u64 * indices.len() as u64;
@@ -802,9 +689,8 @@ struct VsOut {
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     let position = scene_transform * vec4<f32>(in.coords, 0.0, 1.0);
-    let tex_coords = vec2<f32>(in.tex_coords.x, 1.0 - in.tex_coords.y);
 
-    return VsOut(position, tex_coords, in.fill_color);
+    return VsOut(position, in.tex_coords, in.fill_color);
 }
 
 struct FsIn {
@@ -852,6 +738,7 @@ pub(crate) enum DrawCommand<'scene> {
         from: Vec2,
         to: Vec2,
         texture: &'scene Texture,
+        sub_coords: Option<(Vec2, Vec2)>,
     },
     View(View),
 }

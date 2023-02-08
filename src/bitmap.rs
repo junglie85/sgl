@@ -1,5 +1,8 @@
 use std::{mem::size_of, ops::Deref, slice::from_raw_parts};
 
+#[cfg(feature = "image")]
+use image::{load_from_memory, DynamicImage, GenericImageView};
+
 use crate::{Pixel, SglError};
 
 pub struct Bitmap {
@@ -59,6 +62,26 @@ impl Bitmap {
         if x < self.width && y < self.height {
             self.pixels[y as usize * self.width as usize + x as usize] = pixel;
         }
+    }
+}
+
+#[cfg(feature = "image")]
+impl Bitmap {
+    pub fn from_image_bytes(bytes: &[u8]) -> Result<Bitmap, SglError> {
+        let img = load_from_memory(bytes).map_err(|e| SglError::General(e.to_string()))?;
+
+        Self::from_image(&img)
+    }
+
+    pub fn from_image(img: &DynamicImage) -> Result<Bitmap, SglError> {
+        let dimensions = img.dimensions();
+        let rgba = img.to_rgba8();
+        let pixels = rgba
+            .chunks(4)
+            .map(|b| b.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Bitmap::from_pixels(dimensions.0, dimensions.1, pixels)
     }
 }
 

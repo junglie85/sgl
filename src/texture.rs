@@ -37,6 +37,14 @@ impl Texture {
         }
     }
 
+    pub fn width(&self) -> u32 {
+        self.size.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.size.height
+    }
+
     fn create_gpu_resources(
         gpu: &GraphicsDevice,
         width: u32,

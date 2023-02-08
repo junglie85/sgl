@@ -75,6 +75,25 @@ impl<'scene> Scene<'scene> {
             from: from.into().into(),
             to: to.into().into(),
             texture,
+            sub_coords: None,
+        })
+    }
+
+    pub fn draw_textured_rect_ext<V>(
+        &mut self,
+        from: V,
+        to: V,
+        texture: &'scene Texture,
+        sub_coord_from: V,
+        sub_coord_to: V,
+    ) where
+        V: Into<Vector2<f32>>,
+    {
+        self.draw_commands.push(DrawCommand::RectTextured {
+            from: from.into().into(),
+            to: to.into().into(),
+            texture,
+            sub_coords: Some((sub_coord_from.into().into(), sub_coord_to.into().into())),
         })
     }
 }
